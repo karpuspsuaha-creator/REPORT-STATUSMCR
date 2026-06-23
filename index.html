@@ -335,6 +335,21 @@
       </div>
     </div>
 
+    <!-- EDIT ROW MODAL -->
+    <div id="editRowModal" class="modal-overlay" style="display: none;">
+      <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header">
+          <h2>Edit Row</h2>
+          <button class="modal-close" onclick="closeEditModal()">✕</button>
+        </div>
+        <div class="edit-form"></div>
+        <div class="modal-footer">
+          <button class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+          <button class="btn-save" onclick="saveEditModal()">Save</button>
+        </div>
+      </div>
+    </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="formlogin.js"></script>
