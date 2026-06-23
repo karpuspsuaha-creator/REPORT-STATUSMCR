@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>MCC SYSTEM</title>
+    <link rel="stylesheet" href="formlogin.css" />
+    <link rel="stylesheet" href="basepage.css" />
+  </head>
+  <body>
+    <div class="bg-circle circle1"></div>
+    <div class="bg-circle circle2"></div>
+
+    <section id="loginPage" class="active-page">
+      <div class="login-container-wrapper">
+        <div class="login-container">
+          <div class="logo">MCC</div>
+
+          <h1>Monitoring Control Center</h1>
+
+          <form id="loginForm">
+            <div class="input-group">
+              <label>Access</label>
+              <input type="text" id="loginRole" placeholder="Enter Access" />
+            </div>
+
+            <div class="input-group">
+              <label>Password</label>
+              <input
+                type="password"
+                id="loginPassword"
+                placeholder="Enter Password"
+              />
+            </div>
+
+            <div id="loginError" class="error"></div>
+
+            <button class="login-btn" type="submit">LOGIN</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <section id="dashboardPage">
+      <div class="sidebar">
+        <div class="brand">
+          <div class="brand-logo">MCC</div>
+          <div class="brand-text">
+            <h2>MCC SYSTEM</h2>
+            <p>Monitoring Control Center</p>
+          </div>
+        </div>
+
+        <div class="menu">
+          <div class="menu-item active" data-target="generateSection">
+            📊 Generate Data
+          </div>
+          <div class="menu-item" data-target="resultSection">📄 Result KML</div>
+          <div class="menu-item" data-target="reportStatusSection">
+            📑 Report Status
+          </div>
+          <div class="menu-item" data-target="geoSection">📍 Geo Location</div>
+        </div>
+
+        <button id="logoutBtn" class="logout-btn">Logout</button>
+      </div>
+
+      <div class="main-content">
+        <div class="topbar">
+          <h1 id="pageTitle">Generate Data</h1>
+          <p id="welcomeText">Welcome 👋</p>
+        </div>
+
+        <div id="generateSection" class="page-section">
+          <!-- LEFT PANEL -->
+          <div class="card import-panel">
+            <h3>Import Data Source</h3>
+            <p>Upload the file before the system begins processing</p>
+
+            <div class="import-buttons">
+              <input
+                type="file"
+                id="komdisFile"
+                accept="
+                .xlsx,.xlsm,.xlsb,
+                application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
+                application/vnd.ms-excel.sheet.macroEnabled.12,
+                application/vnd.ms-excel.sheet.binary.macroEnabled.12,
+                application/vnd.ms-excel"
+                hidden
+                onchange="handleFile('komdis')"
+              />
+
+              <input
+                type="file"
+                id="foremanFile"
+                accept=".xlsx,.xlsm,.xlsb,
+                application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
+                application/vnd.ms-excel.sheet.macroEnabled.12,
+                application/vnd.ms-excel.sheet.binary.macroEnabled.12,
+                application/vnd.ms-excel"
+                hidden
+                onchange="handleFile('foreman')"
+              />
+
+              <input
+                type="file"
+                id="equipmentCoordinateStartFile"
+                accept=".kml,.kmz"
+                hidden
+                onchange="handleFile('equipmentCoordinateStart')"
+              />
+
+              <input
+                type="file"
+                id="equipmentCoordinateEndFile"
+                accept=".kml,.kmz"
+                hidden
+                onchange="handleFile('equipmentCoordinateEnd')"
+              />
+
+              <input
+                type="file"
+                id="boundaryKMLFile"
+                accept=".kml,.kmz"
+                hidden
+                onchange="handleFile('boundaryKML')"
+              />
+
+              <input
+                type="file"
+                id="masterUnitFile"
+                accept=".xlsx,.xlsm,.xlsb,
+                application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,
+                application/vnd.ms-excel.sheet.macroEnabled.12,
+                application/vnd.ms-excel.sheet.binary.macroEnabled.12,
+                application/vnd.ms-excel"
+                hidden
+                onchange="handleFile('masterUnit')"
+              />
+
+              <button onclick="document.getElementById('komdisFile').click()">
+                📁 Komdis Data
+              </button>
+
+              <button onclick="document.getElementById('foremanFile').click()">
+                👷 Foreman Data
+              </button>
+
+              <button
+                onclick="
+                  document
+                    .getElementById('equipmentCoordinateStartFile')
+                    .click()
+                "
+              >
+                🗺️ Equipment Coordinate Start
+              </button>
+
+              <button
+                onclick="
+                  document.getElementById('equipmentCoordinateEndFile').click()
+                "
+              >
+                🗺️ Equipment Coordinate End
+              </button>
+
+              <button
+                onclick="document.getElementById('boundaryKMLFile').click()"
+              >
+                🗺️ Boundary Working Area
+              </button>
+
+              <button
+                onclick="document.getElementById('masterUnitFile').click()"
+              >
+                🚜 Master Unit
+              </button>
+            </div>
+
+            <div class="report-setup">
+              <h4>Report Date Setup</h4>
+
+              <div class="setup-grid">
+                <div class="setup-item">
+                  <label>Select Date</label>
+
+                  <input
+                    type="date"
+                    id="reportDatePicker"
+                    onchange="updateReportDate()"
+                  />
+
+                  <div id="reportDatePreview"></div>
+                </div>
+
+                <div class="setup-item">
+                  <label>Select Shift</label>
+
+                  <select id="reportShift">
+                    <option value="Shift 1">Shift 1</option>
+                    <option value="Shift 2">Shift 2</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button class="primary process-btn" onclick="handleKMLProcess()">
+                ⚡ Process Equipment KML and Working Area KMZ
+              </button>
+
+              <button
+                class="primary process-btn"
+                onclick="handleReportStatus()"
+              >
+                ⚡ Process Report Status
+              </button>
+            </div>
+          </div>
+
+          <!-- RIGHT PANEL -->
+          <div class="card status-panel">
+            <h3>System Status</h3>
+            <p>Make sure the file has been uploaded</p>
+
+            <div class="status-item">
+              <span>📂 File Komdis</span>
+              <b id="statusKomdis">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>👷 Foreman</span>
+              <b id="statusForeman">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>🗺️ Equipment Coordinate Start</span>
+              <b id="statusEquipmentCoordinateStart">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>🗺️ Equipment Coordinate End</span>
+              <b id="statusEquipmentCoordinateEnd">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>🗺️ Boundary Working Area</span>
+              <b id="statusBoundaryKML">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>🚜 Master Unit</span>
+              <b id="statusMasterUnit">Not Uploaded</b>
+            </div>
+
+            <div class="status-item">
+              <span>⚙️ System</span>
+              <b id="statusSystem">Idle</b>
+            </div>
+          </div>
+        </div>
+
+        <div id="resultSection" class="page-section">
+          <div class="card result-card">
+            <div class="result-header">
+              <h3>Result KML</h3>
+            </div>
+
+            <div id="resultKML">
+              <div class="empty-state">No data available...</div>
+            </div>
+
+            <div id="resultInfo" class="result-info"></div>
+            <div class="pagination" id="kmlPagination"></div>
+
+            <div class="result-footer">
+              <button id="exportKMLBtn" style="display: none">
+                Export to Excel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="reportStatusSection" class="page-section">
+          <div class="card result-card">
+            <div class="result-header">
+              <h3>Report Status</h3>
+            </div>
+
+            <div id="reportStatusInfo" class="result-info"></div>
+
+            <div id="reportStatusResult">
+              <div class="empty-state">No data available...</div>
+            </div>
+
+            <div class="pagination" id="reportStatusPagination"></div>
+
+            <div class="result-footer">
+              <button
+                id="exportReportStatusBtn"
+                onclick="exportReportStatusExcel()"
+                style="display: none"
+              >
+                Export to Excel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="geoSection" class="page-section">
+          <div class="card">
+            <h3>Geo Location</h3>
+            <p>Location monitoring system.</p>
+          </div>
+
+          <div class="card">
+            <h3>Coordinate Data</h3>
+            <p>Latitude & Longitude</p>
+          </div>
+
+          <div class="card">
+            <h3>Map Tracking</h3>
+            <p>Realtime coordinate monitoring.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div id="successPopup" class="success-popup">
+      <div class="popup-box">
+        <div class="popup-icon">✓</div>
+        <h2>Login Success</h2>
+        <button id="continueBtn" class="popup-btn">Continue</button>
+      </div>
+    </div>
+
+    <!-- EDIT ROW MODAL -->
+    <div id="editRowModal" class="modal-overlay" style="display: none;">
+      <div class="modal-content" style="max-height: 80vh; overflow-y: auto;">
+        <div class="modal-header">
+          <h2>Edit Row</h2>
+          <button class="modal-close" onclick="closeEditModal()">✕</button>
+        </div>
+        <div class="edit-form"></div>
+        <div class="modal-footer">
+          <button class="btn-cancel" onclick="closeEditModal()">Cancel</button>
+          <button class="btn-save" onclick="saveEditModal()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="formlogin.js"></script>
+    <script src="script.js"></script>
+    <script src="database.js"></script>
+    <script src="komdis.js"></script>
+    <script src="foreman.js"></script>
+    <script src="kmlkmz.js"></script>
+    <script src="reportstatus.js"></script>
+  </body>
+</html>
