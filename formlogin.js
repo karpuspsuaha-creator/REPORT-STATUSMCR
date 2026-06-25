@@ -35,7 +35,7 @@ loginForm.addEventListener("submit", function (e) {
 
   loginError.style.display = "none";
 
-  if (user.toLowerCase() === "user" && pass === "KAR2026") {
+  if (user.toLowerCase() === "user" && pass === "Kar2026") {
     localStorage.setItem("role", user);
     popup.classList.add("show-popup");
     continueBtn.focus();

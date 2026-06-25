@@ -1668,6 +1668,26 @@ tr:hover .cell-komdis {
   color: #1f2937;
 }
 
+.btn-delete-selected {
+  background: #ef4444;
+  color: white;
+  border: none;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+
+.btn-delete-selected:hover:not(:disabled) {
+  background: #dc2626;
+}
+
+.btn-delete-selected:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ROW SELECTION */
 
 .report-row {

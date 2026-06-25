@@ -12,16 +12,16 @@ const EXCLUDED_COMPANIES = [
 
 const SHIFT_TEMPLATE = {
   "Shift 1": [
-    { start: "06:00", end: "06:45", type: "Change Shift" },
-    { start: "06:45", end: "12:00", type: "Activity" },
+    { start: "06:00", end: "06:15", type: "Change Shift" },
+    { start: "06:15", end: "12:00", type: "Activity" },
     { start: "12:00", end: "13:00", type: "Meal and Rest" },
     { start: "13:00", end: "17:45", type: "Activity" },
     { start: "17:45", end: "18:00", type: "Change Shift" },
   ],
 
   "Shift 2": [
-    { start: "18:00", end: "18:45", type: "Change Shift" },
-    { start: "18:45", end: "00:00", type: "Activity" },
+    { start: "18:00", end: "18:15", type: "Change Shift" },
+    { start: "18:15", end: "00:00", type: "Activity" },
     { start: "00:00", end: "01:00", type: "Meal and Rest" },
     { start: "01:00", end: "05:45", type: "Activity" },
     { start: "05:45", end: "06:00", type: "Change Shift" },
@@ -112,13 +112,13 @@ function getShiftBase(shift) {
 function getShiftStageSlots(shift) {
   if (shift === "Shift 2") {
     return {
-      start: { start: "18:45", end: "00:00" },
+      start: { start: "18:15", end: "00:00" },
       end: { start: "01:00", end: "05:45" },
     };
   }
 
   return {
-    start: { start: "06:45", end: "12:00" },
+    start: { start: "06:15", end: "12:00" },
     end: { start: "13:00", end: "17:45" },
   };
 }
@@ -470,6 +470,7 @@ let reportStatusSourceInfo = null; // untuk tracking sumber data
 let editingRowIndex = -1;
 let editingRowData = {};
 let selectedRows = new Set();
+let lastSelectedFilteredPosition = -1;
 
 // Helper: generate unique key for a row
 function getRowKey(row, index) {
@@ -1863,22 +1864,23 @@ function renderReportStatusTable(data) {
                value="${String(value).replace(/"/g, "&quot;")}"
                onchange="handleFilterChange(event)"
              />
-             <div class="filter-values">
-              ${options
-                .map(
-                  (option) => {
-                    const safeValue = String(option).replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    return `
-                  <button
-                    type="button"
-                    class="filter-option"
-                    data-filter-index="${index}"
-                    data-filter-value="${safeValue}"
-                  >${option}</button>
-                `;
-                  },
-                )
-                .join("")}
+              <div class="filter-values">
+                ${options
+                  .map(
+                    (option) => {
+                      const safeValue = option === "__BLANK_FILTER__" ? "__BLANK_FILTER__" : String(option).replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                      const displayText = option === "__BLANK_FILTER__" ? "(Blank)" : option;
+                      return `
+                    <button
+                      type="button"
+                      class="filter-option"
+                      data-filter-index="${index}"
+                      data-filter-value="${safeValue}"
+                    >${displayText}</button>
+                  `;
+                    },
+                  )
+                  .join("")}
             </div>
             <button type="button" class="filter-clear" onclick="clearFilter(${index})">Clear</button>
           </div>
@@ -1890,6 +1892,9 @@ function renderReportStatusTable(data) {
   html += `
       <th style="width: 80px; text-align: center;">Action</th>
       <th style="width: 50px; text-align: center;"><input type="checkbox" id="selectAllRows" onchange="toggleSelectAll(this.checked)" title="Select all rows" style="cursor: pointer;"></th>
+      <th style="width: 100px; text-align: center;"><button class="btn-delete-selected" onclick="event.stopPropagation(); deleteSelectedRows()" title="Delete selected rows" ${
+        selectedRows.size === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''
+      }>🗑 Hapus (${selectedRows.size})</button></th>
         </tr>
       </thead>
 
@@ -1901,13 +1906,13 @@ function renderReportStatusTable(data) {
   // =========================
   const filteredIndices = [];
   data.forEach((row, idx) => {
+    const originalIndex = reportStatusData.indexOf(row);
     const isKomdis = row.__source === "KOMDIS";
-    const originalIndex = row.__originalIndex !== undefined ? row.__originalIndex : idx;
     filteredIndices.push(originalIndex);
     const isSelected = selectedRows.has(originalIndex);
 
     html += `
-    <tr class="report-row ${isSelected ? "row-selected" : ""}" data-row-index="${originalIndex}" onclick="toggleRowSelect(${originalIndex})">
+    <tr class="report-row ${isSelected ? "row-selected" : ""}" data-row-index="${originalIndex}" onclick="toggleRowSelect(${originalIndex}, ${idx}, event)">
     `;
 
     REPORT_STATUS_COLUMNS.forEach((h) => {
@@ -1925,16 +1930,14 @@ function renderReportStatusTable(data) {
           <button class="btn-edit" onclick="openEditModal(${originalIndex})" title="Edit row">✎</button>
         </td>
         <td style="text-align: center;" onclick="event.stopPropagation();">
-          <input type="checkbox" class="row-checkbox" data-row-index="${originalIndex}" ${
-      isSelected ? "checked" : ""
-    } onchange="toggleRowSelect(${originalIndex})" style="cursor: pointer;">
+          <input type="checkbox" class="row-checkbox" data-row-index="${originalIndex}" ${isSelected ? "checked" : ""} onchange="toggleRowSelect(${originalIndex}, ${idx}, event)" style="cursor: pointer;">
         </td>
       </tr>
     `;
   });
 
-  // Store filtered indices for checkbox handling
-  window._lastFilteredIndices = filteredIndices;
+  // Store rendered indices (filtered position → original index) for shift+click handling
+  window._lastRenderedFilteredIndices = filteredIndices;
 
   // =========================
   // TABLE END
@@ -2065,11 +2068,10 @@ function getFilterOptions() {
   const options = REPORT_STATUS_COLUMNS.map(() => new Set());
 
   REPORT_STATUS_COLUMNS.forEach((column, colIdx) => {
-    // Build a dataset filtered by all active filters except the current column
     const partialFiltered = reportStatusData.filter((row) => {
       return reportStatusFilters.every((filterValue, fIdx) => {
         if (!filterValue) return true;
-        if (fIdx === colIdx) return true; // skip current column's filter
+        if (fIdx === colIdx) return true;
 
         const col = REPORT_STATUS_COLUMNS[fIdx];
         const cell = String(row[col] ?? "").toLowerCase();
@@ -2077,10 +2079,20 @@ function getFilterOptions() {
       });
     });
 
+    let hasBlank = false;
+
     partialFiltered.forEach((row) => {
       const v = String(row[column] ?? "").trim();
-      if (v) options[colIdx].add(v);
+      if (v) {
+        options[colIdx].add(v);
+      } else {
+        hasBlank = true;
+      }
     });
+
+    if (hasBlank) {
+      options[colIdx].add("__BLANK_FILTER__");
+    }
   });
 
   return options.map((set) =>
@@ -2089,21 +2101,21 @@ function getFilterOptions() {
 }
 
 function getFilteredReportStatusData() {
-  return reportStatusData
-    .map((row, index) => ({ row, originalIndex: index }))
-    .filter(({ row }) => {
-      return reportStatusFilters.every((value, index) => {
-        if (!value) return true;
+  return reportStatusData.filter((row) => {
+    return reportStatusFilters.every((value, index) => {
+      if (!value) return true;
 
-        const column = REPORT_STATUS_COLUMNS[index];
-        const cell = String(row[column] ?? "").toLowerCase();
-        return cell.includes(String(value).toLowerCase());
-      });
-    })
-    .map(({ row, originalIndex }) => {
-      row.__originalIndex = originalIndex;
-      return row;
+      const column = REPORT_STATUS_COLUMNS[index];
+      const cellValue = String(row[column] ?? "");
+      const cell = cellValue.toLowerCase();
+
+      if (value === "__BLANK_FILTER__") {
+        return cellValue.trim() === "";
+      }
+
+      return cell.includes(String(value).toLowerCase());
     });
+  });
 }
 
 // =========================
@@ -2251,21 +2263,66 @@ window.saveEditModal = saveEditModal;
 
 // =========================
 // ROW SELECTION
-function toggleRowSelect(rowIndex) {
-  if (selectedRows.has(rowIndex)) {
-    selectedRows.delete(rowIndex);
+function toggleRowSelect(originalIndex, filteredPosition, event) {
+  if (originalIndex < 0 || originalIndex >= reportStatusData.length) return;
+  if (filteredPosition === undefined || filteredPosition === null) return;
+
+  const shiftPressed = event && event.shiftKey;
+  const currentSelection = new Set(selectedRows);
+
+  if (shiftPressed && lastSelectedFilteredPosition !== -1 && lastSelectedFilteredPosition !== filteredPosition) {
+    const start = Math.min(lastSelectedFilteredPosition, filteredPosition);
+    const end = Math.max(lastSelectedFilteredPosition, filteredPosition);
+    const renderedIndices = window._lastRenderedFilteredIndices || [];
+    for (let pos = start; pos <= end; pos++) {
+      if (pos >= 0 && pos < renderedIndices.length) {
+        currentSelection.add(renderedIndices[pos]);
+      }
+    }
+    selectedRows = currentSelection;
   } else {
-    selectedRows.add(rowIndex);
+    if (currentSelection.has(originalIndex)) {
+      currentSelection.delete(originalIndex);
+    } else {
+      currentSelection.add(originalIndex);
+    }
+    selectedRows = currentSelection;
   }
 
+  lastSelectedFilteredPosition = filteredPosition;
   updateSelectAllCheckbox();
   const filteredData = getFilteredReportStatusData();
   renderReportStatusTable(filteredData.length > 0 ? filteredData : reportStatusData);
 }
 
+function deleteSelectedRows() {
+  if (selectedRows.size === 0) {
+    alert("Pilih baris yang ingin dihapus terlebih dahulu");
+    return;
+  }
+
+  closeEditModal();
+
+  if (!confirm(`Hapus ${selectedRows.size} baris yang dipilih?`)) return;
+
+  const sortedIndices = Array.from(selectedRows).sort((a, b) => b - a);
+  sortedIndices.forEach((index) => {
+    if (index >= 0 && index < reportStatusData.length) {
+      reportStatusData.splice(index, 1);
+    }
+  });
+
+    selectedRows.clear();
+    lastSelectedFilteredPosition = -1;
+  updateSelectAllCheckbox();
+  const filteredData = getFilteredReportStatusData();
+  renderReportStatusTable(filteredData.length > 0 ? filteredData : reportStatusData);
+  alert("Baris berhasil dihapus");
+}
+
 function toggleSelectAll(isChecked) {
   // Get original indices from the currently rendered (filtered) data
-  const indicesToToggle = window._lastFilteredIndices || [];
+  const indicesToToggle = window._lastRenderedFilteredIndices || [];
   
   if (isChecked) {
     indicesToToggle.forEach((originalIndex) => {
@@ -2285,7 +2342,7 @@ function updateSelectAllCheckbox() {
   const selectAllCheckbox = document.getElementById("selectAllRows");
   if (!selectAllCheckbox) return;
 
-  const filteredIndices = window._lastFilteredIndices || [];
+  const filteredIndices = window._lastRenderedFilteredIndices || [];
   const totalRows = filteredIndices.length;
   const selectedCount = Array.from(selectedRows).filter(idx => filteredIndices.includes(idx)).length;
 
@@ -2296,6 +2353,7 @@ function updateSelectAllCheckbox() {
 
 window.toggleRowSelect = toggleRowSelect;
 window.toggleSelectAll = toggleSelectAll;
+window.deleteSelectedRows = deleteSelectedRows;
 
 
 // =========================
@@ -2329,10 +2387,13 @@ document
             v = String(v);
           }
         }
-        // trim whitespace-only values
+        // trim whitespace-only values and coerce numeric strings to numbers
         if (typeof v === "string") {
           const trimmed = v.replace(/\u00A0/g, " ").trim();
-          return trimmed === "" ? "" : trimmed;
+          if (trimmed === "") return "";
+          const num = Number(trimmed);
+          if (!Number.isNaN(num)) return num;
+          return trimmed;
         }
         // numbers keep
         return v;
@@ -2343,28 +2404,24 @@ document
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-    // Ensure all cells in range exist and set explicit types
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
         const isHeader = R === range.s.r;
         if (!ws[cellRef]) {
-          ws[cellRef] = { t: "s", v: "" };
+          delete ws[cellRef];
         } else {
           const cell = ws[cellRef];
           if (isHeader) {
-            // header as string
             ws[cellRef] = { t: "s", v: String(cell.v || "") };
           } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
-            ws[cellRef] = { t: "s", v: "" };
+            delete ws[cellRef];
           } else if (typeof cell.v === "number") {
             ws[cellRef] = { t: "n", v: cell.v };
           } else {
-            // ensure strings are real strings (no formulas)
             const text = String(cell.v);
             if (text.startsWith("=")) {
-              // prevent formula execution by prepending a single quote
               ws[cellRef] = { t: "s", v: text };
             } else {
               ws[cellRef] = { t: "s", v: text };
@@ -2373,6 +2430,46 @@ document
         }
       }
     }
+
+    let minR = range.s.r;
+    let maxR = range.e.r;
+    let minC = range.s.c;
+    let maxC = range.e.c;
+    for (let R = maxR; R >= minR; --R) {
+      let hasData = false;
+      for (let C = minC; C <= maxC; ++C) {
+        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
+          hasData = true;
+          break;
+        }
+      }
+      if (!hasData) {
+        for (let C = minC; C <= maxC; ++C) {
+          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
+        }
+        maxR = R - 1;
+      } else {
+        break;
+      }
+    }
+    for (let C = maxC; C >= minC; --C) {
+      let hasData = false;
+      for (let R = minR; R <= maxR; ++R) {
+        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
+          hasData = true;
+          break;
+        }
+      }
+      if (!hasData) {
+        for (let R = minR; R <= maxR; ++R) {
+          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
+        }
+        maxC = C - 1;
+      } else {
+        break;
+      }
+    }
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
 
     // Convert Before/After columns to Excel time serial (fraction of day)
     const beforeColIndex = REPORT_STATUS_COLUMNS.indexOf("Before");
@@ -2448,7 +2545,10 @@ function exportReportStatusLoadExcel() {
       }
       if (typeof v === "string") {
         const trimmed = v.replace(/\u00A0/g, " ").trim();
-        return trimmed === "" ? "" : trimmed;
+        if (trimmed === "") return "";
+        const num = Number(trimmed);
+        if (!Number.isNaN(num)) return num;
+        return trimmed;
       }
       return v;
     });
@@ -2456,34 +2556,74 @@ function exportReportStatusLoadExcel() {
     aoa.push(rowArr);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-  for (let R = range.s.r; R <= range.e.r; ++R) {
-    for (let C = range.s.c; C <= range.e.c; ++C) {
-      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-      const isHeader = R === range.s.r;
-      if (!ws[cellRef]) {
-        ws[cellRef] = { t: "s", v: "" };
-      } else {
-        const cell = ws[cellRef];
-        if (isHeader) {
-          ws[cellRef] = { t: "s", v: String(cell.v || "") };
-        } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
-          ws[cellRef] = { t: "s", v: "" };
-        } else if (typeof cell.v === "number") {
-          ws[cellRef] = { t: "n", v: cell.v };
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+    for (let R = range.s.r; R <= range.e.r; ++R) {
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+        const isHeader = R === range.s.r;
+        if (!ws[cellRef]) {
+          delete ws[cellRef];
         } else {
-          const text = String(cell.v);
-          if (text.startsWith("=")) {
-            ws[cellRef] = { t: "s", v: text };
+          const cell = ws[cellRef];
+          if (isHeader) {
+            ws[cellRef] = { t: "s", v: String(cell.v || "") };
+          } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
+            delete ws[cellRef];
+          } else if (typeof cell.v === "number") {
+            ws[cellRef] = { t: "n", v: cell.v };
           } else {
-            ws[cellRef] = { t: "s", v: text };
+            const text = String(cell.v);
+            if (text.startsWith("=")) {
+              ws[cellRef] = { t: "s", v: text };
+            } else {
+              ws[cellRef] = { t: "s", v: text };
+            }
           }
         }
       }
     }
-  }
+
+    let minR = range.s.r;
+    let maxR = range.e.r;
+    let minC = range.s.c;
+    let maxC = range.e.c;
+    for (let R = maxR; R >= minR; --R) {
+      let hasData = false;
+      for (let C = minC; C <= maxC; ++C) {
+        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
+          hasData = true;
+          break;
+        }
+      }
+      if (!hasData) {
+        for (let C = minC; C <= maxC; ++C) {
+          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
+        }
+        maxR = R - 1;
+      } else {
+        break;
+      }
+    }
+    for (let C = maxC; C >= minC; --C) {
+      let hasData = false;
+      for (let R = minR; R <= maxR; ++R) {
+        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
+          hasData = true;
+          break;
+        }
+      }
+      if (!hasData) {
+        for (let R = minR; R <= maxR; ++R) {
+          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
+        }
+        maxC = C - 1;
+      } else {
+        break;
+      }
+    }
+    ws["!ref"] = XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
 
   const beforeColIndex = REPORT_STATUS_COLUMNS.indexOf("Before");
   const afterColIndex = REPORT_STATUS_COLUMNS.indexOf("After");
@@ -2536,3 +2676,4 @@ function exportReportStatusLoadExcel() {
 
 window.exportReportStatusLoadExcel = exportReportStatusLoadExcel;
 window.handleReportStatus = handleReportStatus;
+window.deleteSelectedRows = deleteSelectedRows;
