@@ -471,6 +471,11 @@ let editingRowIndex = -1;
 let editingRowData = {};
 let selectedRows = new Set();
 
+// Helper: generate unique key for a row
+function getRowKey(row, index) {
+  return `${row["Code Unit"] || ""}|${row["Before"] || ""}|${row["After"] || ""}|${index}`;
+}
+
 // =========================
 // FIND HEADER SMART
 // =========================
@@ -1849,16 +1854,16 @@ function renderReportStatusTable(data) {
           >${hasActive ? "✓" : "≡"}</button>
         </div>
         ${activeFilterIndex === index ? `
-          <div class="filter-box">
-            <input
-              type="text"
-              class="filter-input"
-              placeholder="Filter ${h}"
-              data-filter-index="${index}"
-              value="${String(value).replace(/"/g, "&quot;")}"
-              oninput="handleFilterInput(event)"
-            />
-            <div class="filter-values">
+<div class="filter-box">
+             <input
+               type="text"
+               class="filter-input"
+               placeholder="Filter ${h}"
+               data-filter-index="${index}"
+               value="${String(value).replace(/"/g, "&quot;")}"
+               onchange="handleFilterChange(event)"
+             />
+             <div class="filter-values">
               ${options
                 .map(
                   (option) => {
@@ -1891,39 +1896,45 @@ function renderReportStatusTable(data) {
       <tbody>
   `;
 
-  // =========================
+// =========================
   // ROWS
   // =========================
+  const filteredIndices = [];
   data.forEach((row, idx) => {
     const isKomdis = row.__source === "KOMDIS";
-    const isSelected = selectedRows.has(idx);
+    const originalIndex = row.__originalIndex !== undefined ? row.__originalIndex : idx;
+    filteredIndices.push(originalIndex);
+    const isSelected = selectedRows.has(originalIndex);
 
     html += `
-    <tr class="report-row ${isSelected ? "row-selected" : ""}" data-row-index="${idx}" onclick="toggleRowSelect(${idx}, event)">
-  `;
+    <tr class="report-row ${isSelected ? "row-selected" : ""}" data-row-index="${originalIndex}" onclick="toggleRowSelect(${originalIndex})">
+    `;
 
     REPORT_STATUS_COLUMNS.forEach((h) => {
       const value = row[h] ?? "";
 
       html += `
-      <td class="${isKomdis && value ? "cell-komdis" : ""}">
-        ${value}
-      </td>
-    `;
+        <td class="${isKomdis && value ? "cell-komdis" : ""}">
+          ${value}
+        </td>
+      `;
     });
 
     html += `
-      <td style="text-align: center;" onclick="event.stopPropagation();">
-        <button class="btn-edit" onclick="openEditModal(${idx})" title="Edit row">✎</button>
-      </td>
-      <td style="text-align: center;" onclick="event.stopPropagation();">
-        <input type="checkbox" class="row-checkbox" data-row-index="${idx}" ${
+        <td style="text-align: center;" onclick="event.stopPropagation();">
+          <button class="btn-edit" onclick="openEditModal(${originalIndex})" title="Edit row">✎</button>
+        </td>
+        <td style="text-align: center;" onclick="event.stopPropagation();">
+          <input type="checkbox" class="row-checkbox" data-row-index="${originalIndex}" ${
       isSelected ? "checked" : ""
-    } onchange="toggleRowSelect(${idx})" style="cursor: pointer;">
-      </td>
-    </tr>
-  `;
+    } onchange="toggleRowSelect(${originalIndex})" style="cursor: pointer;">
+        </td>
+      </tr>
+    `;
   });
+
+  // Store filtered indices for checkbox handling
+  window._lastFilteredIndices = filteredIndices;
 
   // =========================
   // TABLE END
@@ -1946,9 +1957,6 @@ function renderReportStatusTable(data) {
     pagination.innerHTML = "";
   }
 
-  // Set filter values after render
-  applyFilterValues();
-
   // =========================
   // BUTTON VISIBILITY BY MODE
   // =========================
@@ -1964,7 +1972,7 @@ function renderReportStatusTable(data) {
   }
 }
 
-function handleFilterInput(event) {
+function handleFilterChange(event) {
   const input = event.target;
   const index = Number(input.dataset.filterIndex);
   const value = input.value;
@@ -1975,11 +1983,30 @@ function handleFilterInput(event) {
   renderReportStatusTable(getFilteredReportStatusData());
 }
 
+function handleFilterInput(event) {
+  const input = event.target;
+  const index = Number(input.dataset.filterIndex);
+  const value = input.value;
+
+  if (!Number.isFinite(index)) return;
+
+  reportStatusFilters[index] = value;
+}
+
 function applyFilterValues() {
+  const activeElement = document.activeElement;
+  const activeFilterIndex = activeElement?.classList.contains("filter-input") 
+    ? Number(activeElement.dataset.filterIndex) 
+    : null;
+    
   const inputs = document.querySelectorAll(".filter-input");
   inputs.forEach((input) => {
     const index = Number(input.dataset.filterIndex);
     if (!Number.isFinite(index)) return;
+    
+    // Skip setting value on the active input to preserve cursor position
+    if (activeFilterIndex === index && document.activeElement === input) return;
+    
     input.value = reportStatusFilters[index] || "";
   });
 }
@@ -2062,15 +2089,21 @@ function getFilterOptions() {
 }
 
 function getFilteredReportStatusData() {
-  return reportStatusData.filter((row) => {
-    return reportStatusFilters.every((value, index) => {
-      if (!value) return true;
+  return reportStatusData
+    .map((row, index) => ({ row, originalIndex: index }))
+    .filter(({ row }) => {
+      return reportStatusFilters.every((value, index) => {
+        if (!value) return true;
 
-      const column = REPORT_STATUS_COLUMNS[index];
-      const cell = String(row[column] ?? "").toLowerCase();
-      return cell.includes(String(value).toLowerCase());
+        const column = REPORT_STATUS_COLUMNS[index];
+        const cell = String(row[column] ?? "").toLowerCase();
+        return cell.includes(String(value).toLowerCase());
+      });
+    })
+    .map(({ row, originalIndex }) => {
+      row.__originalIndex = originalIndex;
+      return row;
     });
-  });
 }
 
 // =========================
@@ -2078,6 +2111,7 @@ function getFilteredReportStatusData() {
 // =========================
 const reportStatusFilters = Array(REPORT_STATUS_COLUMNS.length).fill("");
 let activeFilterIndex = -1;
+let filterDebounceTimer = null;
 
 // =========================
 // HANDLER
@@ -2217,45 +2251,43 @@ window.saveEditModal = saveEditModal;
 
 // =========================
 // ROW SELECTION
-// =========================
-function toggleRowSelect(rowIndex, event) {
-  if (event && event.type === "change") {
-    if (selectedRows.has(rowIndex)) {
-      selectedRows.delete(rowIndex);
-    } else {
-      selectedRows.add(rowIndex);
-    }
-  } else if (event) {
-    event.preventDefault();
-    if (selectedRows.has(rowIndex)) {
-      selectedRows.delete(rowIndex);
-    } else {
-      selectedRows.add(rowIndex);
-    }
+function toggleRowSelect(rowIndex) {
+  if (selectedRows.has(rowIndex)) {
+    selectedRows.delete(rowIndex);
+  } else {
+    selectedRows.add(rowIndex);
   }
 
   updateSelectAllCheckbox();
-  renderReportStatusTable(reportStatusData);
+  const filteredData = getFilteredReportStatusData();
+  renderReportStatusTable(filteredData.length > 0 ? filteredData : reportStatusData);
 }
 
 function toggleSelectAll(isChecked) {
-  selectedRows.clear();
-
+  // Get original indices from the currently rendered (filtered) data
+  const indicesToToggle = window._lastFilteredIndices || [];
+  
   if (isChecked) {
-    for (let i = 0; i < reportStatusData.length; i++) {
-      selectedRows.add(i);
-    }
+    indicesToToggle.forEach((originalIndex) => {
+      selectedRows.add(originalIndex);
+    });
+  } else {
+    indicesToToggle.forEach((originalIndex) => {
+      selectedRows.delete(originalIndex);
+    });
   }
 
-  renderReportStatusTable(reportStatusData);
+  updateSelectAllCheckbox();
+  renderReportStatusTable(getFilteredReportStatusData());
 }
 
 function updateSelectAllCheckbox() {
   const selectAllCheckbox = document.getElementById("selectAllRows");
   if (!selectAllCheckbox) return;
 
-  const totalRows = reportStatusData.length;
-  const selectedCount = selectedRows.size;
+  const filteredIndices = window._lastFilteredIndices || [];
+  const totalRows = filteredIndices.length;
+  const selectedCount = Array.from(selectedRows).filter(idx => filteredIndices.includes(idx)).length;
 
   selectAllCheckbox.checked = selectedCount === totalRows && totalRows > 0;
   selectAllCheckbox.indeterminate =
