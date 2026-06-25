@@ -1219,6 +1219,64 @@ td.site-wrong {
   box-shadow: 0 18px 35px rgba(16, 185, 129, 0.35);
 }
 
+#exportReportStatusLoadBtn {
+  height: 54px;
+
+  padding: 0 28px;
+
+  border: none;
+
+  border-radius: 18px;
+
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+
+  margin-top: 24px;
+
+  margin-left: auto;
+
+  font-size: 14px;
+
+  font-weight: 800;
+
+  color: white;
+
+  cursor: pointer;
+
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+
+  box-shadow: 0 12px 25px rgba(217, 119, 6, 0.22);
+
+  transition: 0.25s;
+}
+
+#exportReportStatusLoadBtn::before {
+  content: "";
+
+  display: inline-block;
+
+  width: 22px;
+
+  height: 22px;
+
+  background-color: #fff;
+
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 9.5 3.5 5h-2.2L12 13.7 9.7 16.5H7.5l3.5-5L7.5 7h2.2L12 10.3 14.3 7h2.2z'/%3E%3C/svg%3E")
+    no-repeat center/contain;
+
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm-1 9.5 3.5 5h-2.2L12 13.7 9.7 16.5H7.5l3.5-5L7.5 7h2.2L12 10.3 14.3 7h2.2z'/%3E%3C/svg%3E")
+    no-repeat center/contain;
+}
+
+#exportReportStatusLoadBtn:hover {
+  transform: translateY(-3px);
+
+  box-shadow: 0 18px 35px rgba(217, 119, 6, 0.35);
+}
+
 /* =========================
    REPORT DATE SETUP PREMIUM
 ========================= */

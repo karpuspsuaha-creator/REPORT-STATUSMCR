@@ -459,6 +459,12 @@ let reportStatusSummary = {
 };
 
 // =========================
+// MODE TRACKING (LOAD vs GENERATE)
+// =========================
+let reportStatusMode = null; // 'load' | 'generate' | null
+let reportStatusSourceInfo = null; // untuk tracking sumber data
+
+// =========================
 // EDIT STATE
 // =========================
 let editingRowIndex = -1;
@@ -1260,7 +1266,235 @@ function buildReportStatusPopulationSummary(masterUnit = [], kmlMap = {}) {
 // PROCESS
 // =========================
 
+// Helper: extract Google Drive file ID from various link formats
+function extractDriveFileId(url) {
+  if (!url) return null;
+  const s = String(url).trim();
+  const patterns = [/\/d\/([a-zA-Z0-9_-]{10,})/, /id=([a-zA-Z0-9_-]{10,})/, /open\?id=([a-zA-Z0-9_-]{10,})/];
+  for (const p of patterns) {
+    const m = s.match(p);
+    if (m) return m[1];
+  }
+
+  // plain id
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(s)) return s;
+
+  return null;
+}
+
+// Load an .xlsx file or Google Sheets CSV from a public link and store into window.uploadedData
+async function loadExcelFromDrive() {
+  const link = document.getElementById("driveLinkInput")?.value || "";
+  const target = document.getElementById("driveTarget")?.value || "activity";
+  const statusEl = document.getElementById("driveLoadStatus");
+
+  console.log("🔄 loadExcelFromDrive START - target:", target);
+
+  if (!link) {
+    if (statusEl) statusEl.textContent = "Paste Drive/Sheets link or file id first.";
+    return;
+  }
+
+  const id = extractDriveFileId(link) || link;
+  if (!id) {
+    if (statusEl) statusEl.textContent = "Invalid Drive/Sheets link or file id.";
+    return;
+  }
+
+  // Detect Google Sheets URL
+  const isSheets = /docs\.google\.com\/spreadsheets/.test(link);
+
+  try {
+    if (statusEl) statusEl.textContent = "Loading...";
+
+    if (isSheets) {
+      // extract gid if present
+      const gidMatch = String(link).match(/[?&]gid=(\d+)/);
+      const gid = gidMatch ? gidMatch[1] : "0";
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+
+      const res = await fetch(csvUrl);
+      if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+
+      const text = await res.text();
+
+      const parsedHeader = Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => String(h || "").trim().replace(/^\uFEFF/, ""),
+      });
+      const parsed = parsedHeader.data || [];
+      const fields = parsedHeader.meta && parsedHeader.meta.fields ? parsedHeader.meta.fields : [];
+      const dataArray = Papa.parse(text, { skipEmptyLines: true }).data || [];
+
+      window.uploadedData = window.uploadedData || {};
+
+      if (target === "reportStatus") {
+        const rowsFromHeader = parsed.map((row) => {
+          const normalized = {};
+          REPORT_STATUS_COLUMNS.forEach((col) => {
+            let v = row[col];
+            if (v === undefined || v === null) v = "";
+            if (typeof v === "string") v = v.trim();
+            normalized[col] = v;
+          });
+          return normalized;
+        });
+
+        const headerRow = dataArray[0] || [];
+        const headerMap = {};
+        headerRow.forEach((h, idx) => {
+          headerMap[normalizeKey(h)] = idx;
+        });
+
+        const rowsFromArray = dataArray.slice(1).map((row) => {
+          const normalized = {};
+          REPORT_STATUS_COLUMNS.forEach((col) => {
+            const idx = headerMap[normalizeKey(col)];
+            let v = idx !== undefined && idx >= 0 ? row[idx] : "";
+            if (v === undefined || v === null) v = "";
+            if (typeof v === "string") v = v.trim();
+            normalized[col] = v;
+          });
+          return normalized;
+        });
+
+        const hasHeaderData = rowsFromHeader.length > 0 && Object.values(rowsFromHeader[0]).some((v) => String(v).trim() !== "");
+        reportStatusData = hasHeaderData ? rowsFromHeader : rowsFromArray;
+
+        // 🔥 VALIDASI: pastikan data loaded adalah array dan punya isi
+        if (!Array.isArray(reportStatusData)) {
+          throw new Error("Failed to parse spreadsheet: reportStatusData is not an array");
+        }
+
+        // 🔥 UPDATE SUMMARY untuk load mode
+        reportStatusSummary = {
+          total: reportStatusData.length,
+          filledKml: 0, // dalam load mode, kita tidak tahu berapa filled dari KML
+          empty: 0,
+        };
+
+        // 🔥 SET MODE TO LOAD (jangan auto-trigger generate)
+        reportStatusMode = "load";
+        reportStatusSourceInfo = {
+          type: "spreadsheet",
+          rows: reportStatusData.length,
+          columns: fields.length,
+        };
+
+        window.uploadedData.reportStatus = reportStatusData;
+        if (statusEl) {
+          const sampleCols = fields.slice(0, 5).join(", ");
+          statusEl.textContent = `Loaded Google Sheets report status → ${reportStatusData.length} rows; ${fields.length} columns (${sampleCols}${fields.length > 5 ? ", ..." : ""})`;
+        }
+        console.log("✓ reportStatus LOAD MODE - data ready:", reportStatusData.length, "rows");
+        console.log("reportStatusData sample", reportStatusData.slice(0, 3));
+        
+        // 🔥 RENDER hanya setelah data FULLY READY
+        renderReportStatusTable(reportStatusData);
+      } else {
+        // merge with existing if possible (preserve previous uploads)
+        const existing = window.uploadedData[target];
+        if (Array.isArray(existing) && Array.isArray(dataArray) && existing.length && dataArray.length) {
+          // assume first row is header; append rows after header
+          const toAppend = dataArray.length > 1 ? dataArray.slice(1) : [];
+          window.uploadedData[target] = existing.concat(toAppend);
+        } else {
+          window.uploadedData[target] = dataArray;
+        }
+
+        if (statusEl) statusEl.textContent = `Loaded Google Sheets (CSV) → ${dataArray.length - 1} rows into ${target}`;
+
+        // update convenience globals used elsewhere
+        if (target === "foreman") window.foremanData = window.uploadedData.foreman;
+        if (target === "komdis") window.komdisData = window.uploadedData.komdis;
+
+        // update status UI if available
+        try {
+          if (typeof status !== "undefined") {
+            status[target] = "Uploaded ✔";
+            if (typeof updateStatusUI === "function") updateStatusUI();
+          }
+        } catch (e) {
+          /* ignore */
+        }
+      }
+
+      // persist state so previous uploads are not lost on reload
+      if (typeof window.persistAppState === "function") window.persistAppState();
+    } else {
+      // fallback to Drive file download (xlsx)
+      const url = `https://drive.google.com/uc?export=download&id=${id}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+
+      const ab = await res.arrayBuffer();
+
+      const workbook = XLSX.read(ab, { type: "array" });
+      const sheetNames = workbook.SheetNames || [];
+      const result = {};
+      sheetNames.forEach((name) => {
+        const ws = workbook.Sheets[name];
+        const arr = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        result[name] = arr;
+      });
+
+      const firstSheet = sheetNames[0];
+      const dataArray = result[firstSheet] || [];
+
+      window.uploadedData = window.uploadedData || {};
+
+      const existing = window.uploadedData[target];
+      if (Array.isArray(existing) && Array.isArray(dataArray) && existing.length && dataArray.length) {
+        const toAppend = dataArray.length > 1 ? dataArray.slice(1) : [];
+        window.uploadedData[target] = existing.concat(toAppend);
+      } else {
+        window.uploadedData[target] = dataArray;
+      }
+
+      if (statusEl) statusEl.textContent = `Loaded sheet ${firstSheet} → ${dataArray.length - 1} rows into ${target}`;
+
+      if (target === "foreman") window.foremanData = window.uploadedData.foreman;
+      if (target === "komdis") window.komdisData = window.uploadedData.komdis;
+
+      if (typeof window.persistAppState === "function") window.persistAppState();
+      try {
+        if (typeof status !== "undefined") {
+          status[target] = "Uploaded ✔";
+          if (typeof updateStatusUI === "function") updateStatusUI();
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    // If we loaded critical data that processReportStatus expects, re-run it
+    // TAPI: hanya kalau kita sedang dalam mode GENERATE (bukan LOAD)
+    // User harus eksplisit click "Generate Report Status" button
+    if (["masterUnit", "komdis", "foreman", "activity"].includes(target)) {
+      if (reportStatusMode === "generate") {
+        try {
+          processReportStatus();
+        } catch (e) {
+          console.warn("processReportStatus failed after load:", e);
+        }
+      }
+    }
+  } catch (err) {
+    console.error("❌ loadExcelFromDrive ERROR:", err);
+    if (statusEl) statusEl.textContent = "❌ Error loading file: " + err.message + ". CORS or file visibility may block direct download.";
+  }
+}
+
 function processReportStatus() {
+  // 🔥 SET MODE TO GENERATE
+  reportStatusMode = "generate";
+  reportStatusSourceInfo = {
+    type: "generated",
+    sources: ["master", "foreman", "komdis", "kml"],
+    timestamp: new Date().toISOString(),
+  };
+
   reportStatusData = [];
   reportStatusCurrentPage = 1;
 
@@ -1454,10 +1688,14 @@ function processReportStatus() {
 
   reportStatusData.sort(sortCodeUnit);
 
-  renderReportStatusTable(reportStatusData);
+  // 🔥 VALIDASI: pastikan data generate punya isi sebelum render
+  if (!Array.isArray(reportStatusData) || reportStatusData.length === 0) {
+    console.warn("⚠ Generate mode: no data after processing");
+  } else {
+    console.log("✓ reportStatus GENERATE MODE - data ready:", reportStatusData.length, "rows");
+  }
 
-  const btn = document.getElementById("exportReportStatusBtn");
-  if (btn) btn.style.display = "flex";
+  renderReportStatusTable(reportStatusData);
 }
 
 // =========================
@@ -1509,15 +1747,36 @@ function renderReportStatusPagination(totalPages) {
 }
 
 function renderReportStatusTable(data) {
+  console.log("🎨 renderReportStatusTable CALLED - data length:", data?.length, "type:", typeof data);
+  
+  // 🔥 VALIDASI: pastikan data yang dikirim adalah array yang valid
+  if (!Array.isArray(data)) {
+    console.warn("❌ renderReportStatusTable: data is not an array", data);
+    const container = document.getElementById("reportStatusResult");
+    if (container) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <div>Data tidak valid atau belum tersedia</div>
+          <div style="font-size: 0.8em; color: #999; margin-top: 8px;">Data type: ${typeof data}</div>
+        </div>
+      `;
+    }
+    return;
+  }
+
   const container = document.getElementById("reportStatusResult");
   const info = document.getElementById("reportStatusInfo");
 
-  if (!container) return;
+  if (!container) {
+    console.warn("❌ renderReportStatusTable: container not found");
+    return;
+  }
 
   // =========================
   // EMPTY
   // =========================
   if (!data.length) {
+    console.log("ℹ️ renderReportStatusTable: data is empty");
     const hasActiveFilters = (typeof reportStatusFilters !== 'undefined') && reportStatusFilters.some((v) => Boolean(v));
     container.innerHTML = `
       <div class="empty-state">
@@ -1537,11 +1796,18 @@ function renderReportStatusTable(data) {
     return;
   }
 
+  console.log("✓ renderReportStatusTable: building table with", data.length, "rows");
+
   // =========================
   // INFO
   // =========================
   if (info) {
+    const modeLabel = reportStatusMode === "generate" ? "Generated" : reportStatusMode === "load" ? "Loaded" : "Unknown";
+    const modeColor = reportStatusMode === "generate" ? "#4CAF50" : reportStatusMode === "load" ? "#2196F3" : "#999";
+    
     info.innerHTML = `
+      <span style="color: ${modeColor}; font-weight: bold;">● ${modeLabel}</span>
+      •
       Population Total:
       <strong>${reportStatusSummary.total}</strong>
       •
@@ -1667,7 +1933,9 @@ function renderReportStatusTable(data) {
     </table>
   `;
 
+  console.log("✓ renderReportStatusTable: HTML built, rendering to container");
   container.innerHTML = html;
+  console.log("✓ renderReportStatusTable: COMPLETE - table rendered successfully");
 
   // =========================
   // DISABLE PAGINATION
@@ -1680,6 +1948,20 @@ function renderReportStatusTable(data) {
 
   // Set filter values after render
   applyFilterValues();
+
+  // =========================
+  // BUTTON VISIBILITY BY MODE
+  // =========================
+  const exportBtn = document.getElementById("exportReportStatusBtn");
+  const exportLoadBtn = document.getElementById("exportReportStatusLoadBtn");
+
+  if (exportBtn) {
+    exportBtn.style.display = reportStatusMode === "generate" ? "flex" : "none";
+  }
+
+  if (exportLoadBtn) {
+    exportLoadBtn.style.display = reportStatusMode === "load" ? "flex" : "none";
+  }
 }
 
 function handleFilterInput(event) {
@@ -1996,49 +2278,83 @@ document
       return;
     }
 
-    const ws = XLSX.utils.json_to_sheet(reportStatusData);
+    // Build sheet from array-of-arrays to ensure every cell is explicitly created
+    const aoa = [];
+    // Header row
+    aoa.push(REPORT_STATUS_COLUMNS.slice());
 
-    // Konversi semua cell menjadi value type untuk mencegah interpretasi formula
+    // Rows
+    for (let i = 0; i < reportStatusData.length; i++) {
+      const row = reportStatusData[i] || {};
+      const rowArr = REPORT_STATUS_COLUMNS.map((col) => {
+        let v = row[col];
+        if (v === null || v === undefined) return "";
+        // convert objects to string
+        if (typeof v === "object") {
+          try {
+            v = JSON.stringify(v);
+          } catch (e) {
+            v = String(v);
+          }
+        }
+        // trim whitespace-only values
+        if (typeof v === "string") {
+          const trimmed = v.replace(/\u00A0/g, " ").trim();
+          return trimmed === "" ? "" : trimmed;
+        }
+        // numbers keep
+        return v;
+      });
+
+      aoa.push(rowArr);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // Ensure all cells in range exist and set explicit types
     const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
     for (let R = range.s.r; R <= range.e.r; ++R) {
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-        if (ws[cellRef]) {
+        const isHeader = R === range.s.r;
+        if (!ws[cellRef]) {
+          ws[cellRef] = { t: "s", v: "" };
+        } else {
           const cell = ws[cellRef];
-          // Pastikan semua cell adalah value, bukan formula
-          if (cell.t === "f" || cell.t === "s") {
-            // Jika formula, konversi ke value
-            const value = cell.v !== undefined ? cell.v : cell.w || "";
-            ws[cellRef] = { t: "s", v: String(value) };
-          } else if (cell.t === "n") {
-            // Number tetap sebagai number value
+          if (isHeader) {
+            // header as string
+            ws[cellRef] = { t: "s", v: String(cell.v || "") };
+          } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
+            ws[cellRef] = { t: "s", v: "" };
+          } else if (typeof cell.v === "number") {
             ws[cellRef] = { t: "n", v: cell.v };
           } else {
-            // Cell lainnya pastikan punya value
-            if (cell.v === undefined) {
-              ws[cellRef] = { t: "s", v: "" };
+            // ensure strings are real strings (no formulas)
+            const text = String(cell.v);
+            if (text.startsWith("=")) {
+              // prevent formula execution by prepending a single quote
+              ws[cellRef] = { t: "s", v: text };
+            } else {
+              ws[cellRef] = { t: "s", v: text };
             }
           }
         }
       }
     }
 
-    // Format kolom Before dan After sebagai time
+    // Convert Before/After columns to Excel time serial (fraction of day)
     const beforeColIndex = REPORT_STATUS_COLUMNS.indexOf("Before");
     const afterColIndex = REPORT_STATUS_COLUMNS.indexOf("After");
-
     for (let R = range.s.r + 1; R <= range.e.r; ++R) {
-      // Skip header row
       if (beforeColIndex >= 0) {
-        const beforeCellRef = XLSX.utils.encode_cell({
-          r: R,
-          c: beforeColIndex,
-        });
-        if (ws[beforeCellRef] && ws[beforeCellRef].v) {
-          const timeStr = String(ws[beforeCellRef].v);
-          const [h, m] = timeStr.split(":").map(Number);
-          if (!isNaN(h) && !isNaN(m)) {
-            // Konversi ke Excel time serial (fraction of day)
+        const beforeCellRef = XLSX.utils.encode_cell({ r: R, c: beforeColIndex });
+        const cell = ws[beforeCellRef];
+        if (cell && cell.v) {
+          const timeStr = String(cell.v).trim();
+          const parts = timeStr.split(":").map(Number);
+          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            const h = parts[0];
+            const m = parts[1];
             const timeValue = (h * 60 + m) / (24 * 60);
             ws[beforeCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
           }
@@ -2046,11 +2362,13 @@ document
       }
       if (afterColIndex >= 0) {
         const afterCellRef = XLSX.utils.encode_cell({ r: R, c: afterColIndex });
-        if (ws[afterCellRef] && ws[afterCellRef].v) {
-          const timeStr = String(ws[afterCellRef].v);
-          const [h, m] = timeStr.split(":").map(Number);
-          if (!isNaN(h) && !isNaN(m)) {
-            // Konversi ke Excel time serial (fraction of day)
+        const cell = ws[afterCellRef];
+        if (cell && cell.v) {
+          const timeStr = String(cell.v).trim();
+          const parts = timeStr.split(":").map(Number);
+          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+            const h = parts[0];
+            const m = parts[1];
             const timeValue = (h * 60 + m) / (24 * 60);
             ws[afterCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
           }
@@ -2058,42 +2376,131 @@ document
       }
     }
 
-    // =========================
-    // AUTOFIT SMART
-    // =========================
-
-    ws["!cols"] = REPORT_STATUS_COLUMNS.map((header) => {
+    // Autofit columns
+    ws["!cols"] = REPORT_STATUS_COLUMNS.map((header, ci) => {
       let width = header.length;
-
-      for (let i = 0; i < reportStatusData.length; i++) {
-        const value = String(reportStatusData[i][header] ?? "");
-
-        // handle text multiline
-        const longestLine = value
-          .split("\n")
-          .reduce((max, line) => Math.max(max, line.length), 0);
-
-        if (longestLine > width) {
-          width = longestLine;
-        }
+      for (let r = 1; r < aoa.length; r++) {
+        const v = aoa[r][ci];
+        const text = v === undefined || v === null ? "" : String(v);
+        const longestLine = text.split("\n").reduce((max, line) => Math.max(max, line.length), 0);
+        if (longestLine > width) width = longestLine;
       }
-
-      return {
-        wch: Math.max(
-          12, // minimum
-          Math.min(
-            width + 3, // padding
-            80, // maksimum
-          ),
-        ),
-      };
+      return { wch: Math.max(12, Math.min(width + 3, 80)) };
     });
 
     const wb = XLSX.utils.book_new();
-
     XLSX.utils.book_append_sheet(wb, ws, "Report Status");
-
     XLSX.writeFile(wb, "Report_Status.xlsx");
   });
 
+function exportReportStatusLoadExcel() {
+  if (!reportStatusData.length) {
+    alert("Tidak ada data untuk diekspor");
+    return;
+  }
+
+  const aoa = [];
+  aoa.push(REPORT_STATUS_COLUMNS.slice());
+
+  for (let i = 0; i < reportStatusData.length; i++) {
+    const row = reportStatusData[i] || {};
+    const rowArr = REPORT_STATUS_COLUMNS.map((col) => {
+      let v = row[col];
+      if (v === null || v === undefined) return "";
+      if (typeof v === "object") {
+        try {
+          v = JSON.stringify(v);
+        } catch (e) {
+          v = String(v);
+        }
+      }
+      if (typeof v === "string") {
+        const trimmed = v.replace(/\u00A0/g, " ").trim();
+        return trimmed === "" ? "" : trimmed;
+      }
+      return v;
+    });
+
+    aoa.push(rowArr);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+      const isHeader = R === range.s.r;
+      if (!ws[cellRef]) {
+        ws[cellRef] = { t: "s", v: "" };
+      } else {
+        const cell = ws[cellRef];
+        if (isHeader) {
+          ws[cellRef] = { t: "s", v: String(cell.v || "") };
+        } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
+          ws[cellRef] = { t: "s", v: "" };
+        } else if (typeof cell.v === "number") {
+          ws[cellRef] = { t: "n", v: cell.v };
+        } else {
+          const text = String(cell.v);
+          if (text.startsWith("=")) {
+            ws[cellRef] = { t: "s", v: text };
+          } else {
+            ws[cellRef] = { t: "s", v: text };
+          }
+        }
+      }
+    }
+  }
+
+  const beforeColIndex = REPORT_STATUS_COLUMNS.indexOf("Before");
+  const afterColIndex = REPORT_STATUS_COLUMNS.indexOf("After");
+  for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+    if (beforeColIndex >= 0) {
+      const beforeCellRef = XLSX.utils.encode_cell({ r: R, c: beforeColIndex });
+      const cell = ws[beforeCellRef];
+      if (cell && cell.v) {
+        const timeStr = String(cell.v).trim();
+        const parts = timeStr.split(":").map(Number);
+        if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          const h = parts[0];
+          const m = parts[1];
+          const timeValue = (h * 60 + m) / (24 * 60);
+          ws[beforeCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
+        }
+      }
+    }
+    if (afterColIndex >= 0) {
+      const afterCellRef = XLSX.utils.encode_cell({ r: R, c: afterColIndex });
+      const cell = ws[afterCellRef];
+      if (cell && cell.v) {
+        const timeStr = String(cell.v).trim();
+        const parts = timeStr.split(":").map(Number);
+        if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+          const h = parts[0];
+          const m = parts[1];
+          const timeValue = (h * 60 + m) / (24 * 60);
+          ws[afterCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
+        }
+      }
+    }
+  }
+
+  ws["!cols"] = REPORT_STATUS_COLUMNS.map((header, ci) => {
+    let width = header.length;
+    for (let r = 1; r < aoa.length; r++) {
+      const v = aoa[r][ci];
+      const text = v === undefined || v === null ? "" : String(v);
+      const longestLine = text.split("\n").reduce((max, line) => Math.max(max, line.length), 0);
+      if (longestLine > width) width = longestLine;
+    }
+    return { wch: Math.max(12, Math.min(width + 3, 80)) };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report Status");
+  XLSX.writeFile(wb, "Report_Status.xlsx");
+}
+
+window.exportReportStatusLoadExcel = exportReportStatusLoadExcel;
 window.handleReportStatus = handleReportStatus;

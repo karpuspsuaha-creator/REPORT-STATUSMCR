@@ -288,7 +288,23 @@
               <h3>Report Status</h3>
             </div>
 
-            <div id="reportStatusInfo" class="result-info"></div>
+                <div class="drive-loader" style="margin-bottom:12px;">
+                  <label style="font-weight:600">Load Excel from Google Drive</label>
+                  <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+                    <input type="text" id="driveLinkInput" placeholder="Paste Drive share link or file id" style="flex:1;padding:6px;" />
+                    <select id="driveTarget" style="padding:6px">
+                      <option value="reportStatus" selected>Report Status</option>
+                      <option value="activity">Activity / Source</option>
+                      <option value="komdis">Komdis</option>
+                      <option value="foreman">Foreman</option>
+                      <option value="masterUnit">Master Unit</option>
+                    </select>
+                    <button onclick="loadExcelFromDrive()" style="padding:6px 10px;">Load</button>
+                  </div>
+                  <div id="driveLoadStatus" style="margin-top:6px;color:#333;font-size:13px"></div>
+                </div>
+
+                <div id="reportStatusInfo" class="result-info"></div>
 
             <div id="reportStatusResult">
               <div class="empty-state">No data available...</div>
@@ -300,6 +316,13 @@
               <button
                 id="exportReportStatusBtn"
                 onclick="exportReportStatusExcel()"
+                style="display: none"
+              >
+                Export to Excel
+              </button>
+              <button
+                id="exportReportStatusLoadBtn"
+                onclick="exportReportStatusLoadExcel()"
                 style="display: none"
               >
                 Export to Excel
@@ -352,6 +375,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="formlogin.js"></script>
     <script src="script.js"></script>
     <script src="database.js"></script>
