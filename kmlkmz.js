@@ -409,6 +409,8 @@ function buildRows(points, source = "") {
       LEN_RESOLVE: lenResolve,
       "Code Unit MCR": resolved,
       SFROM: source,
+      lat: p.lat,
+      lon: p.lon,
       _eqpValid: isEqpCorrect ? "OK" : "WRONG",
       _siteValid: isSiteCorrect ? "OK" : "WRONG",
     };
@@ -481,10 +483,139 @@ function exportExcel(data) {
 let currentPage = 1;
 const rowsPerPage = 100;
 
+// =========================
+// COORDINATE TABLE (Name, LAT, LON only)
+// =========================
+let currentCoordFilter = "all"; // all | start | end
+
+function getCoordinateSourceRows() {
+  const all = window.kmlResult || [];
+  if (!Array.isArray(all)) return [];
+  return all;
+}
+
+function renderCoordinateTable(filter = "all") {
+  const tbody = document.querySelector("#coordinateTable tbody");
+  if (!tbody) return;
+
+  currentCoordFilter = filter;
+
+  // Pastikan state tombol selalu konsisten saat render
+  syncCoordButtonsUI(filter);
+
+  const data = getCoordinateSourceRows().filter((r) => {
+    if (filter === "all") return true;
+    return String(r.SFROM || "").toLowerCase() === String(filter).toLowerCase();
+  });
+
+  if (!data.length) {
+    tbody.innerHTML = "";
+    return;
+  }
+
+  const rowsHtml = data
+    .map((r) => {
+      const name = r.Name ?? "";
+      const lat = r.lat ?? "";
+      const lon = r.lon ?? "";
+      const sfrom = r.SFROM ?? "";
+      return `<tr><td>${name}</td><td>${lat}</td><td>${lon}</td><td>${sfrom}</td></tr>`;
+    })
+    .join("");
+
+  tbody.innerHTML = rowsHtml;
+}
+
+
+function syncCoordButtonsUI(filter) {
+  const startBtn = document.getElementById("startCoordBtn");
+  const endBtn = document.getElementById("endCoordBtn");
+  const allBtn = document.getElementById("allCoordBtn");
+
+  if (!startBtn || !endBtn || !allBtn) return;
+
+  // Start/End menandakan sumber data yang diambil.
+  // - filter=start => start biru, end tidak
+  // - filter=end => end biru, start tidak
+  // - filter=all => start & end sama-sama biru
+  startBtn.classList.toggle("active", filter === "start" || filter === "all");
+  endBtn.classList.toggle("active", filter === "end" || filter === "all");
+  allBtn.classList.toggle("active", filter === "all");
+
+}
+
+
+function exportCoordinateExcelFiltered() {
+  const all = getCoordinateSourceRows();
+  const filtered = all.filter((r) => {
+    if (currentCoordFilter === "all") return true;
+    return String(r.SFROM || "").toLowerCase() === String(currentCoordFilter).toLowerCase();
+  });
+
+  const exportData = filtered.map((r) => ({
+    Name: r.Name ?? "",
+    LAT: r.lat ?? "",
+    LON: r.lon ?? "",
+  }));
+
+  if (!exportData.length) {
+    alert("Tidak ada data koordinat untuk diexport");
+    return;
+  }
+
+  const ws = XLSX.utils.json_to_sheet(exportData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "COORDINATE");
+  XLSX.writeFile(wb, `KML_COORDINATE_${currentCoordFilter}.xlsx`);
+}
+
+function bindCoordinateButtonsOnce() {
+  const startBtn = document.getElementById("startCoordBtn");
+  const endBtn = document.getElementById("endCoordBtn");
+  const allBtn = document.getElementById("allCoordBtn");
+  const exportBtn = document.getElementById("exportCoordinateBtn");
+
+  if (startBtn && !startBtn.dataset.bound) {
+    startBtn.dataset.bound = "1";
+    startBtn.onclick = () => {
+      renderCoordinateTable("start");
+      syncCoordButtonsUI("start");
+    };
+  }
+
+  if (endBtn && !endBtn.dataset.bound) {
+    endBtn.dataset.bound = "1";
+    endBtn.onclick = () => {
+      renderCoordinateTable("end");
+      syncCoordButtonsUI("end");
+    };
+  }
+
+  if (allBtn && !allBtn.dataset.bound) {
+    allBtn.dataset.bound = "1";
+    allBtn.onclick = () => {
+      renderCoordinateTable("all");
+      syncCoordButtonsUI("all");
+    };
+  }
+
+  if (exportBtn && !exportBtn.dataset.bound) {
+    exportBtn.dataset.bound = "1";
+    exportBtn.onclick = () => exportCoordinateExcelFiltered();
+  }
+}
+
+
+function clearCoordinateTable() {
+  const tbody = document.querySelector("#coordinateTable tbody");
+  if (tbody) tbody.innerHTML = "";
+}
+
 function renderResultTable(data) {
   const container = document.getElementById("resultKML");
   const pagination = document.getElementById("kmlPagination");
   const info = document.getElementById("resultInfo");
+
 
   if (!data.length) {
     container.innerHTML = `<div class="empty-state">Tidak ada data</div>`;
@@ -613,6 +744,8 @@ async function processKMLKMZ(
 // HANDLER
 // =========================
 async function handleKMLProcess() {
+  bindCoordinateButtonsOnce();
+
   const startFile = document.getElementById("equipmentCoordinateStartFile")
     ?.files[0];
   const endFile = document.getElementById("equipmentCoordinateEndFile")
@@ -650,6 +783,11 @@ async function handleKMLProcess() {
     // render langsung
     renderResultTable(result);
 
+    // otomatis render coordinate table (default ALL) begitu proses selesai
+    renderCoordinateTable("all");
+    syncCoordButtonsUI("all");
+
+
     document.getElementById("exportKMLBtn").style.display = "block";
 
     alert("PROCESS SUCCESS ✔");
@@ -666,3 +804,14 @@ document.getElementById("exportKMLBtn")?.addEventListener("click", () => {
     exportExcel(window.kmlResult);
   }
 });
+
+// preload coordinate table when result already exists (after refresh)
+try {
+  if (Array.isArray(window.kmlResult)) {
+    renderCoordinateTable("all");
+    syncCoordButtonsUI("all");
+  }
+} catch (e) {
+  // ignore
+}
+

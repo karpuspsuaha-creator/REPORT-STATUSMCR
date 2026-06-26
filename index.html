@@ -6,6 +6,7 @@
     <title>MCC SYSTEM</title>
     <link rel="stylesheet" href="formlogin.css" />
     <link rel="stylesheet" href="basepage.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   </head>
   <body>
     <div class="bg-circle circle1"></div>
@@ -332,21 +333,41 @@
         </div>
 
         <div id="geoSection" class="page-section">
-          <div class="card">
+          <div class="card geo-main-card">
             <h3>Geo Location</h3>
             <p>Location monitoring system.</p>
+            <div id="map" class="leaflet-map"></div>
           </div>
 
           <div class="card">
             <h3>Coordinate Data</h3>
             <p>Latitude & Longitude</p>
-          </div>
+            <div id="coordinateTableContainer" class="coordinate-table-container">
+              <table id="coordinateTable" class="geo-coordinate-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>LAT</th>
+                    <th>LON</th>
+                    <th>SFROM</th>
 
-          <div class="card">
-            <h3>Map Tracking</h3>
-            <p>Realtime coordinate monitoring.</p>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+
+            <div class="geo-toggle-buttons">
+              <button id="startCoordBtn" class="geo-btn active" type="button">Start</button>
+              <button id="endCoordBtn" class="geo-btn" type="button">End</button>
+              <button id="allCoordBtn" class="geo-btn" type="button">All</button>
+            </div>
+
+            <button id="exportCoordinateBtn" class="geo-export-btn">Export to Excel</button>
+
           </div>
         </div>
+        
       </div>
     </section>
 
@@ -383,5 +404,7 @@
     <script src="foreman.js"></script>
     <script src="kmlkmz.js"></script>
     <script src="reportstatus.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="geolocation.js"></script>
   </body>
 </html>
