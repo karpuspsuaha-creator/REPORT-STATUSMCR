@@ -395,6 +395,7 @@ function buildActivityRowTimeline(
 function mapKmlCategory(kml) {
   const v = String(kml || "").toUpperCase();
 
+  if (v === "B") return "BD Unschedule";
   if (v === "BD") return "BD Unschedule";
   if (v === "R") return "Working";
   if (v === "NR") return "No Operator";
