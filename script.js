@@ -357,18 +357,14 @@ async function handleFile(type) {
 // =========================
 async function readKML(file) {
   const fileName = file.name.toLowerCase();
+  let kmlText = "";
 
   if (fileName.endsWith(".kml")) {
-    const text = await file.text();
-    return new DOMParser().parseFromString(text, "text/xml");
-  }
-
-  if (fileName.endsWith(".kmz")) {
+    kmlText = await file.text();
+  } else if (fileName.endsWith(".kmz")) {
     if (!window.JSZip) throw new Error("JSZip belum di-load");
 
     const zip = await JSZip.loadAsync(file);
-
-    let kmlText = "";
 
     for (const path in zip.files) {
       if (path.toLowerCase().endsWith(".kml")) {
@@ -376,11 +372,15 @@ async function readKML(file) {
         break;
       }
     }
-
-    return new DOMParser().parseFromString(kmlText, "text/xml");
   }
 
-  throw new Error("Format tidak didukung");
+  kmlText = kmlText.replace(/^\uFEFF/, "");
+
+  if (!kmlText) {
+    throw new Error("File KML/KMZ kosong atau tidak bisa dibaca");
+  }
+
+  return new DOMParser().parseFromString(kmlText, "text/xml");
 }
 
 // =========================

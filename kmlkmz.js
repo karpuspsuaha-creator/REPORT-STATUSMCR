@@ -12,6 +12,33 @@ function cleanText(str) {
     .replace(/[^\w]/g, ""); // hapus titik, dash, dll
 }
 
+function findFirstByLocalName(parent, tagName) {
+  const all = parent.getElementsByTagName("*");
+  const lower = String(tagName || "").toLowerCase();
+
+  for (let i = 0; i < all.length; i++) {
+    if ((all[i].localName || all[i].tagName || "").toLowerCase() === lower) {
+      return all[i];
+    }
+  }
+
+  return null;
+}
+
+function findAllByLocalName(parent, tagName) {
+  const all = parent.getElementsByTagName("*");
+  const lower = String(tagName || "").toLowerCase();
+  const result = [];
+
+  for (let i = 0; i < all.length; i++) {
+    if ((all[i].localName || all[i].tagName || "").toLowerCase() === lower) {
+      result.push(all[i]);
+    }
+  }
+
+  return result;
+}
+
 // =========================
 // READ KML / KMZ
 // =========================
@@ -32,6 +59,12 @@ async function readKML(file) {
     }
   }
 
+  kmlText = kmlText.replace(/^\uFEFF/, "");
+
+  if (!kmlText) {
+    throw new Error("File KML/KMZ kosong atau tidak bisa dibaca");
+  }
+
   return new DOMParser().parseFromString(kmlText, "text/xml");
 }
 
@@ -39,11 +72,11 @@ async function readKML(file) {
 // PARSE POINTS
 // =========================
 function parsePoints(xml) {
-  const placemarks = [...xml.querySelectorAll("Placemark")];
+  const placemarks = findAllByLocalName(xml, "Placemark");
 
   return placemarks.map((p) => {
-    const name = (p.querySelector("name")?.textContent || "").trim();
-    const coords = (p.querySelector("coordinates")?.textContent || "")
+    const name = (findFirstByLocalName(p, "name")?.textContent || "").trim();
+    const coords = (findFirstByLocalName(p, "coordinates")?.textContent || "")
       .trim()
       .split(" ")[0]
       .split(",");
@@ -60,21 +93,37 @@ function parsePoints(xml) {
 // POLYGON
 // =========================
 function parsePolygons(xml) {
-  const placemarks = [...xml.querySelectorAll("Placemark")];
+  const placemarks = findAllByLocalName(xml, "Placemark");
 
   return placemarks.map((p) => {
-    const name = (p.querySelector("name")?.textContent || "").trim();
-    const coordsText = (
-      p.querySelector("coordinates")?.textContent || ""
-    ).trim();
+    const name = (findFirstByLocalName(p, "name")?.textContent || "").trim();
+
+    let coordsText = "";
+
+    const polygons = findAllByLocalName(p, "Polygon");
+    for (let i = 0; i < polygons.length; i++) {
+      const candidate = findFirstByLocalName(polygons[i], "coordinates");
+      if (candidate && candidate.textContent.trim()) {
+        coordsText = candidate.textContent.trim();
+        break;
+      }
+    }
+
+    if (!coordsText) {
+      const anyCoords = findFirstByLocalName(p, "coordinates");
+      if (anyCoords) {
+        coordsText = anyCoords.textContent.trim();
+      }
+    }
 
     const coords = coordsText
-      .split(" ")
+      .split(/\s+/)
       .filter(Boolean)
       .map((c) => {
         const [lon, lat] = c.split(",");
         return [parseFloat(lon), parseFloat(lat)];
-      });
+      })
+      .filter(([lon, lat]) => Number.isFinite(lon) && Number.isFinite(lat));
 
     return { name, coords };
   });

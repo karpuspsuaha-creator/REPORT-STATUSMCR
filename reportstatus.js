@@ -58,7 +58,7 @@ function isActivitySlot(type) {
 }
 
 function isSystemSlot(type) {
-  return ["Activity", "Meal and Rest", "Change Shift"].includes(
+  return ["Activity", "Meal and Rest", "Change Shift", "Waiting Blasting"].includes(
     String(type || "").trim(),
   );
 }
@@ -395,7 +395,6 @@ function buildActivityRowTimeline(
 function mapKmlCategory(kml) {
   const v = String(kml || "").toUpperCase();
 
-  if (v === "B") return "BD Unschedule";
   if (v === "BD") return "BD Unschedule";
   if (v === "R") return "Working";
   if (v === "NR") return "No Operator";
@@ -472,6 +471,8 @@ let editingRowIndex = -1;
 let editingRowData = {};
 let selectedRows = new Set();
 let lastSelectedFilteredPosition = -1;
+let waitingBlastingMode = false;
+let waitingBlastingLocations = [];
 
 // Helper: generate unique key for a row
 function getRowKey(row, index) {
@@ -995,45 +996,55 @@ function buildDynamicTimeline(
 
   // 🔥 FIX: Gabungkan KML overrides dengan source overrides (komdis/foreman)
   // Prioritaskan source overrides untuk tracking KOMDIS, tapi gunakan KML untuk waktu
-  const overrides = [...(kmlOverrides || []), ...(sourceOverrides || [])];
+  let overrides = [...(kmlOverrides || []), ...(sourceOverrides || [])];
 
-  const merged = overrides.length
+  // 🔥 ADD WAITING BLASTING: Insert Waiting Blasting slot for Shift 1
+  // Check if this unit has matching location and waiting blasting mode is active
+  const selectedShift = document.getElementById("reportShift")?.value || "";
+  if (waitingBlastingMode && selectedShift === "Shift 1") {
+    // Check if location matches selected locations (or all if no filter)
+    const location = kmlMeta.location || "";
+    const locationMatches = waitingBlastingLocations.length === 0 || 
+      waitingBlastingLocations.some(selectedLoc => location.toLowerCase().includes(selectedLoc.toLowerCase()));
+    
+    if (locationMatches) {
+      overrides.push({
+        start: "16:00",
+        end: "17:00",
+        type: "Waiting Blasting",
+        category: "Standby",
+        remarks: "",
+        location: location,
+        source: "SYSTEM",
+      });
+    }
+  }
+
+  overrides = overrides.length
     ? mergeTimeline(baseShift, overrides).map((slot) => {
         return {
           start: slot.start,
           end: slot.end,
-
           type: slot.type || "",
-
           category: slot.category || kmlMeta.category || "",
-
           overrideType: slot.type || "",
-
           remarks: slot.remarks || "",
-
           location: slot.location || "",
-
           source: slot.source || "",
         };
       })
     : baseShift.map((slot) => ({
         start: slot.start,
         end: slot.end,
-
         type: slot.type,
-
         category: kmlMeta.category || "",
-
         overrideType: slot.type,
-
         remarks: "",
-
         location: "",
-
         source: "",
       }));
 
-  return capTimelineActivitySlots(merged);
+  return capTimelineActivitySlots(overrides);
 }
 
 function resolveKmlLocationForSlot(
@@ -1104,7 +1115,8 @@ function isStandbyTriggerItemCategory(itemCategory) {
 function resolveReportCategory(itemCategory, fallbackCategory) {
   if (
     ["Meal and Rest", "Change Shift"].includes(itemCategory) ||
-    isStandbyTriggerItemCategory(itemCategory)
+    isStandbyTriggerItemCategory(itemCategory) ||
+    itemCategory === "Waiting Blasting"
   ) {
     return "Standby";
   }
@@ -1966,6 +1978,8 @@ function renderReportStatusTable(data) {
   // =========================
   const exportBtn = document.getElementById("exportReportStatusBtn");
   const exportLoadBtn = document.getElementById("exportReportStatusLoadBtn");
+  const addWaitingBlastingBtn = document.getElementById("addWaitingBlastingBtn");
+  const selectedShift = document.getElementById("reportShift")?.value || "";
 
   if (exportBtn) {
     exportBtn.style.display = reportStatusMode === "generate" ? "flex" : "none";
@@ -1973,6 +1987,10 @@ function renderReportStatusTable(data) {
 
   if (exportLoadBtn) {
     exportLoadBtn.style.display = reportStatusMode === "load" ? "flex" : "none";
+  }
+
+  if (addWaitingBlastingBtn) {
+    addWaitingBlastingBtn.style.display = reportStatusMode === "generate" ? "flex" : "none";
   }
 }
 
@@ -2143,8 +2161,8 @@ async function handleReportStatus() {
 
     let missing = [];
 
-    if (!eqStartFile) missing.push("🗺️ Equipment Coordinate Start");
-    if (!eqEndFile) missing.push("🗺️ Equipment Coordinate End");
+    if (!eqStartFile && !eqEndFile)
+      missing.push("🗺️ Equipment Coordinate Start/End");
     if (!areaFile) missing.push("🗺️ Boundary");
     if (!master.length) missing.push("🚜 Master Unit");
 
@@ -2153,20 +2171,29 @@ async function handleReportStatus() {
       return;
     }
 
-    window.kmlResultStart = await processKMLKMZ(
-      eqStartFile,
-      areaFile,
-      master,
-      activity,
-      "start",
-    );
-    window.kmlResultEnd = await processKMLKMZ(
-      eqEndFile,
-      areaFile,
-      master,
-      activity,
-      "end",
-    );
+    if (eqStartFile) {
+      window.kmlResultStart = await processKMLKMZ(
+        eqStartFile,
+        areaFile,
+        master,
+        activity,
+        "start",
+      );
+    } else {
+      window.kmlResultStart = [];
+    }
+
+    if (eqEndFile) {
+      window.kmlResultEnd = await processKMLKMZ(
+        eqEndFile,
+        areaFile,
+        master,
+        activity,
+        "end",
+      );
+    } else {
+      window.kmlResultEnd = [];
+    }
     window.kmlResult = mergeKMLResults(
       window.kmlResultStart,
       window.kmlResultEnd,
@@ -2356,172 +2383,9 @@ window.toggleRowSelect = toggleRowSelect;
 window.toggleSelectAll = toggleSelectAll;
 window.deleteSelectedRows = deleteSelectedRows;
 
-
 // =========================
-// EXPORT
+// EXPORT (handled by onclick in HTML)
 // =========================
-
-document
-  .getElementById("exportReportStatusBtn")
-  ?.addEventListener("click", () => {
-    if (!reportStatusData.length) {
-      alert("Tidak ada data");
-      return;
-    }
-
-    // Build sheet from array-of-arrays to ensure every cell is explicitly created
-    const aoa = [];
-    // Header row
-    aoa.push(REPORT_STATUS_COLUMNS.slice());
-
-    // Rows
-    for (let i = 0; i < reportStatusData.length; i++) {
-      const row = reportStatusData[i] || {};
-      const rowArr = REPORT_STATUS_COLUMNS.map((col) => {
-        let v = row[col];
-        if (v === null || v === undefined) return "";
-        // convert objects to string
-        if (typeof v === "object") {
-          try {
-            v = JSON.stringify(v);
-          } catch (e) {
-            v = String(v);
-          }
-        }
-        // trim whitespace-only values and coerce numeric strings to numbers
-        if (typeof v === "string") {
-          const trimmed = v.replace(/\u00A0/g, " ").trim();
-          if (trimmed === "") return "";
-          const num = Number(trimmed);
-          if (!Number.isNaN(num)) return num;
-          return trimmed;
-        }
-        // numbers keep
-        return v;
-      });
-
-      aoa.push(rowArr);
-    }
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-    const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
-    for (let R = range.s.r; R <= range.e.r; ++R) {
-      for (let C = range.s.c; C <= range.e.c; ++C) {
-        const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
-        const isHeader = R === range.s.r;
-        if (!ws[cellRef]) {
-          delete ws[cellRef];
-        } else {
-          const cell = ws[cellRef];
-          if (isHeader) {
-            ws[cellRef] = { t: "s", v: String(cell.v || "") };
-          } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
-            delete ws[cellRef];
-          } else if (typeof cell.v === "number") {
-            ws[cellRef] = { t: "n", v: cell.v };
-          } else {
-            const text = String(cell.v);
-            if (text.startsWith("=")) {
-              ws[cellRef] = { t: "s", v: text };
-            } else {
-              ws[cellRef] = { t: "s", v: text };
-            }
-          }
-        }
-      }
-    }
-
-    let minR = range.s.r;
-    let maxR = range.e.r;
-    let minC = range.s.c;
-    let maxC = range.e.c;
-    for (let R = maxR; R >= minR; --R) {
-      let hasData = false;
-      for (let C = minC; C <= maxC; ++C) {
-        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
-          hasData = true;
-          break;
-        }
-      }
-      if (!hasData) {
-        for (let C = minC; C <= maxC; ++C) {
-          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        }
-        maxR = R - 1;
-      } else {
-        break;
-      }
-    }
-    for (let C = maxC; C >= minC; --C) {
-      let hasData = false;
-      for (let R = minR; R <= maxR; ++R) {
-        if (ws[XLSX.utils.encode_cell({ r: R, c: C })]) {
-          hasData = true;
-          break;
-        }
-      }
-      if (!hasData) {
-        for (let R = minR; R <= maxR; ++R) {
-          delete ws[XLSX.utils.encode_cell({ r: R, c: C })];
-        }
-        maxC = C - 1;
-      } else {
-        break;
-      }
-    }
-    ws["!ref"] = XLSX.utils.encode_range({ s: { r: minR, c: minC }, e: { r: maxR, c: maxC } });
-
-    // Convert Before/After columns to Excel time serial (fraction of day)
-    const beforeColIndex = REPORT_STATUS_COLUMNS.indexOf("Before");
-    const afterColIndex = REPORT_STATUS_COLUMNS.indexOf("After");
-    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
-      if (beforeColIndex >= 0) {
-        const beforeCellRef = XLSX.utils.encode_cell({ r: R, c: beforeColIndex });
-        const cell = ws[beforeCellRef];
-        if (cell && cell.v) {
-          const timeStr = String(cell.v).trim();
-          const parts = timeStr.split(":").map(Number);
-          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-            const h = parts[0];
-            const m = parts[1];
-            const timeValue = (h * 60 + m) / (24 * 60);
-            ws[beforeCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
-          }
-        }
-      }
-      if (afterColIndex >= 0) {
-        const afterCellRef = XLSX.utils.encode_cell({ r: R, c: afterColIndex });
-        const cell = ws[afterCellRef];
-        if (cell && cell.v) {
-          const timeStr = String(cell.v).trim();
-          const parts = timeStr.split(":").map(Number);
-          if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-            const h = parts[0];
-            const m = parts[1];
-            const timeValue = (h * 60 + m) / (24 * 60);
-            ws[afterCellRef] = { t: "n", v: timeValue, z: "hh:mm" };
-          }
-        }
-      }
-    }
-
-    // Autofit columns
-    ws["!cols"] = REPORT_STATUS_COLUMNS.map((header, ci) => {
-      let width = header.length;
-      for (let r = 1; r < aoa.length; r++) {
-        const v = aoa[r][ci];
-        const text = v === undefined || v === null ? "" : String(v);
-        const longestLine = text.split("\n").reduce((max, line) => Math.max(max, line.length), 0);
-        if (longestLine > width) width = longestLine;
-      }
-      return { wch: Math.max(12, Math.min(width + 3, 80)) };
-    });
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Report Status");
-    XLSX.writeFile(wb, "Report_Status.xlsx");
-  });
 
 function exportReportStatusLoadExcel() {
   if (!reportStatusData.length) {
@@ -2678,3 +2542,172 @@ function exportReportStatusLoadExcel() {
 window.exportReportStatusLoadExcel = exportReportStatusLoadExcel;
 window.handleReportStatus = handleReportStatus;
 window.deleteSelectedRows = deleteSelectedRows;
+
+function exportReportStatusExcel() {
+  if (!reportStatusData.length) {
+    alert("Tidak ada data");
+    return;
+  }
+
+  const aoa = [];
+  aoa.push(REPORT_STATUS_COLUMNS.slice());
+
+  for (let i = 0; i < reportStatusData.length; i++) {
+    const row = reportStatusData[i] || {};
+    const rowArr = REPORT_STATUS_COLUMNS.map((col) => {
+      let v = row[col];
+      if (v === null || v === undefined) return "";
+      if (typeof v === "object") {
+        try {
+          v = JSON.stringify(v);
+        } catch (e) {
+          v = String(v);
+        }
+      }
+      if (typeof v === "string") {
+        const trimmed = v.replace(/\u00A0/g, " ").trim();
+        if (trimmed === "") return "";
+        const num = Number(trimmed);
+        if (!Number.isNaN(num)) return num;
+        return trimmed;
+      }
+      return v;
+    });
+
+    aoa.push(rowArr);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1");
+  for (let R = range.s.r; R <= range.e.r; ++R) {
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+      const isHeader = R === range.s.r;
+      if (!ws[cellRef]) {
+        delete ws[cellRef];
+      } else {
+        const cell = ws[cellRef];
+        if (isHeader) {
+          ws[cellRef] = { t: "s", v: String(cell.v || "") };
+        } else if (cell.v === null || cell.v === undefined || String(cell.v).trim() === "") {
+          delete ws[cellRef];
+        } else if (typeof cell.v === "number") {
+          ws[cellRef] = { t: "n", v: cell.v };
+        } else {
+          const text = String(cell.v);
+          ws[cellRef] = { t: "s", v: text };
+        }
+      }
+    }
+  }
+
+  ws["!cols"] = REPORT_STATUS_COLUMNS.map((header, ci) => {
+    let width = header.length;
+    for (let r = 1; r < aoa.length; r++) {
+      const v = aoa[r][ci];
+      const text = v === undefined || v === null ? "" : String(v);
+      const longestLine = text.split("\n").reduce((max, line) => Math.max(max, line.length), 0);
+      if (longestLine > width) width = longestLine;
+    }
+    return { wch: Math.max(12, Math.min(width + 3, 80)) };
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Report Status");
+  XLSX.writeFile(wb, "Report_Status.xlsx");
+}
+
+function addWaitingBlasting() {
+  const selectedShift = document.getElementById("reportShift")?.value || "";
+  
+  if (selectedShift === "Shift 2") {
+    alert("Waiting blasting hanya pada shift 1");
+    return;
+  }
+  
+  // Get unique locations from already rendered report status data
+  const locations = [...new Set(
+    reportStatusData
+      .map(row => row.Location || "")
+      .filter(loc => loc && loc.trim() !== "")
+  )].sort();
+  
+  // Create or update modal
+  let modal = document.getElementById("waitingBlastingModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "waitingBlastingModal";
+    modal.className = "modal-overlay";
+    modal.style.display = "flex";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 400px;">
+        <div class="modal-header">
+          <h2>Filter Location - Waiting Blasting</h2>
+          <button class="modal-close" onclick="closeWaitingBlastingModal()">✕</button>
+        </div>
+        <div class="edit-form">
+          <div class="form-group">
+            <label style="margin-bottom: 12px; display: block;">Select Location(s) Affected</label>
+            <div id="locationFilterContainer" style="max-height: 300px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px;"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" onclick="closeWaitingBlastingModal()">Cancel</button>
+          <button class="btn-save" onclick="confirmWaitingBlasting()" style="background: linear-gradient(135deg, #fde047, #f59e0b);">Apply</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  }
+  
+  // Populate location checkboxes
+  const container = document.getElementById("locationFilterContainer");
+  if (container) {
+    container.innerHTML = locations.map(loc => `
+      <label style="display: block; padding: 8px; cursor: pointer;">
+        <input type="checkbox" class="waiting-location-checkbox" value="${loc}" style="margin-right: 8px; accent-color: #f59e0b;" />
+        ${loc}
+      </label>
+    `).join("");
+  }
+  
+  modal.style.display = "flex";
+}
+
+function closeWaitingBlastingModal() {
+  const modal = document.getElementById("waitingBlastingModal");
+  if (modal) modal.style.display = "none";
+}
+
+function confirmWaitingBlasting() {
+  const checkboxes = document.querySelectorAll(".waiting-location-checkbox:checked");
+  waitingBlastingLocations = Array.from(checkboxes).map(cb => cb.value);
+  
+  if (waitingBlastingLocations.length === 0) {
+    alert("Pilih minimal satu location");
+    return;
+  }
+  
+  waitingBlastingMode = true;
+  closeWaitingBlastingModal();
+  
+  // Add waiting blasting rows to existing data instead of regenerating
+  addWaitingBlastingToExistingData();
+  
+  alert(`Waiting Blasting berhasil ditambahkan untuk ${waitingBlastingLocations.length} location`);
+}
+
+function addWaitingBlastingToExistingData() {
+  const selectedShift = document.getElementById("reportShift")?.value || "";
+  
+  if (selectedShift !== "Shift 1" || !waitingBlastingMode) return;
+  
+  processReportStatus();
+  waitingBlastingMode = false;
+}
+
+window.addWaitingBlasting = addWaitingBlasting;
+window.exportReportStatusExcel = exportReportStatusExcel;
+window.closeWaitingBlastingModal = closeWaitingBlastingModal;
+window.confirmWaitingBlasting = confirmWaitingBlasting;
