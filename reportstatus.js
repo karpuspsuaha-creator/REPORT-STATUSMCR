@@ -1090,9 +1090,29 @@ function resolveKmlLocationForSlot(
   return endLocation || startLocation || fallback;
 }
 
-function getCutOffReportLabel(selectedShift) {
-  if (selectedShift === "Shift 2") return "End of Shift 2";
-  return "End of Shift 1";
+function getCutOffReportLabel(selectedShift, startTime) {
+  if (!startTime) {
+    if (selectedShift === "Shift 2") return "End of Shift 2";
+    return "End of Shift 1";
+  }
+
+  const startMin = toMinutes(startTime);
+
+  if (selectedShift === "Shift 1") {
+    if (startMin >= toMinutes("06:00") && startMin < toMinutes("13:00")) {
+      return "Start of Shift 1";
+    }
+    return "End of Shift 1";
+  }
+
+  if (selectedShift === "Shift 2") {
+    if (startMin >= toMinutes("18:00") || startMin < toMinutes("01:00")) {
+      return "Start of Shift 2";
+    }
+    return "End of Shift 2";
+  }
+
+  return "";
 }
 
 function normalizeStandbyTrigger(value) {
@@ -1678,28 +1698,28 @@ function processReportStatus() {
         kmlMeta.category,
       );
 
-      return {
-        ...baseRow,
+return {
+         ...baseRow,
 
-        Category: category,
+         Category: category,
 
-        "Item Category": itemCategory,
+         "Item Category": itemCategory,
 
-        Material: mapItemCategoryToMaterial(itemCategory),
+         Material: mapItemCategoryToMaterial(itemCategory),
 
-        Location: t.location || kmlLocation || baseRow.Location || "",
+         Location: t.location || kmlLocation || baseRow.Location || "",
 
-        Before: t.start || "",
+         Before: t.start || "",
 
-        After: t.end || "",
+         After: t.end || "",
 
-        "Time Total": getTimeTotal(t.start, t.end),
+         "Time Total": getTimeTotal(t.start, t.end),
 
-        "Cut Off Report": getCutOffReportLabel(selectedShift),
+         "Cut Off Report": getCutOffReportLabel(selectedShift, t.start),
 
-        // 🔥 SOURCE TRACKING
-        __source: t.source || "",
-      };
+         // 🔥 SOURCE TRACKING
+         __source: t.source || "",
+       };
     });
   });
 
