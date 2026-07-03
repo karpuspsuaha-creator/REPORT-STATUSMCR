@@ -2407,6 +2407,25 @@ window.deleteSelectedRows = deleteSelectedRows;
 // EXPORT (handled by onclick in HTML)
 // =========================
 
+// Helper: generate export filename with date and shift
+function getReportExportFilename(baseName, modeSuffix = "") {
+  const selectedDate = window.selectedReportDate || "";
+  const selectedShift = document.getElementById("reportShift")?.value || "";
+
+  const safeDate = selectedDate.replace(/[\s-]/g, "_").replace(/\//g, "-");
+  const shiftPart = selectedShift.replace(/\s+/g, "_");
+  const suffix = modeSuffix ? `_${modeSuffix}` : "";
+
+  if (safeDate && shiftPart) {
+    return `${baseName}_${safeDate}_${shiftPart}${suffix}.xlsx`;
+  } else if (safeDate) {
+    return `${baseName}_${safeDate}${suffix}.xlsx`;
+  } else if (shiftPart) {
+    return `${baseName}_${shiftPart}${suffix}.xlsx`;
+  }
+  return `${baseName}${suffix}.xlsx`;
+}
+
 function exportReportStatusLoadExcel() {
   if (!reportStatusData.length) {
     alert("Tidak ada data untuk diekspor");
@@ -2556,7 +2575,7 @@ function exportReportStatusLoadExcel() {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Report Status");
-  XLSX.writeFile(wb, "Report_Status.xlsx");
+  XLSX.writeFile(wb, getReportExportFilename("Report_Status", "Load"));
 }
 
 window.exportReportStatusLoadExcel = exportReportStatusLoadExcel;
@@ -2635,7 +2654,7 @@ function exportReportStatusExcel() {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Report Status");
-  XLSX.writeFile(wb, "Report_Status.xlsx");
+  XLSX.writeFile(wb, getReportExportFilename("Report_Status"));
 }
 
 function addWaitingBlasting() {

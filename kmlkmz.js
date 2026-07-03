@@ -466,6 +466,28 @@ function buildRows(points, source = "") {
   });
 }
 
+// --------------------------
+// HELPER: Get export filename with date and shift
+// --------------------------
+function getExportFilename(baseName, suffix = "") {
+  const selectedDate = window.selectedReportDate || "";
+  const selectedShift = document.getElementById("reportShift")?.value || "";
+
+  // Format date untuk filename (ganti spasi/dash jadi underscore)
+  const safeDate = selectedDate.replace(/[\s-]/g, "_").replace(/\//g, "-");
+  const shiftPart = selectedShift.replace(/\s+/g, "_");
+  const suffixPart = suffix ? `_${suffix}` : "";
+
+  if (safeDate && shiftPart) {
+    return `${baseName}_${safeDate}_${shiftPart}${suffixPart}.xlsx`;
+  } else if (safeDate) {
+    return `${baseName}_${safeDate}${suffixPart}.xlsx`;
+  } else if (shiftPart) {
+    return `${baseName}_${shiftPart}${suffixPart}.xlsx`;
+  }
+  return `${baseName}.xlsx`;
+}
+
 // =========================
 // EXPORT
 // =========================
@@ -523,7 +545,7 @@ function exportExcel(data) {
 
   XLSX.utils.book_append_sheet(wb, ws, "RESULT");
 
-  XLSX.writeFile(wb, "KML_RESULT.xlsx");
+  XLSX.writeFile(wb, getExportFilename("Result_KML"));
 }
 
 // =========================
@@ -615,7 +637,10 @@ function exportCoordinateExcelFiltered() {
   const ws = XLSX.utils.json_to_sheet(exportData);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "COORDINATE");
-  XLSX.writeFile(wb, `KML_COORDINATE_${currentCoordFilter}.xlsx`);
+
+  // Filter suffix: all -> "all", start -> "start", end -> "end"
+  const suffix = currentCoordFilter && currentCoordFilter !== "all" ? currentCoordFilter : "all";
+  XLSX.writeFile(wb, getExportFilename("Coordinate_Data", suffix));
 }
 
 function bindCoordinateButtonsOnce() {
