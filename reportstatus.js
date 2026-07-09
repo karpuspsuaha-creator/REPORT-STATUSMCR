@@ -124,31 +124,7 @@ function getShiftStageSlots(shift) {
 }
 
 function buildKMLOverrideMap(selectedShift, startRows = [], endRows = []) {
-  const grouped = {};
-  const slots = getShiftStageSlots(selectedShift);
-
-  const addRows = (rows, slot) => {
-    (rows || []).forEach((row) => {
-      const code = normalizeCode(row["Code Unit MCR"] || row["Code Unit"]);
-      const job = String(row.JOB || "").trim();
-
-      if (!code || !job) return;
-
-      if (!grouped[code]) grouped[code] = [];
-
-      grouped[code].push({
-        start: slot.start,
-        end: slot.end,
-        type: "Activity", // FIX UTAMA
-        job: job, // tetap simpan
-      });
-    });
-  };
-
-  addRows(startRows, slots.start);
-  addRows(endRows, slots.end);
-
-  return grouped;
+  return {};
 }
 
 function buildOverrides(source, komdisCodeSet = new Set()) {
@@ -197,9 +173,6 @@ function mergeTimeline(base, overrides) {
   const result = [];
 
   base.forEach((slot) => {
-    // =========================
-    // NON ACTIVITY
-    // =========================
     if (!isActivitySlot(slot.type)) {
       result.push({
         start: slot.start,
@@ -210,25 +183,17 @@ function mergeTimeline(base, overrides) {
       return;
     }
 
-    // =========================
-    // ACTIVITY SLOT
-    // =========================
     const baseRange = normalizeRange(slot.start, slot.end);
 
     let current = baseRange.start;
 
     const ovs = (overrides || [])
-      // 🔥 FIX: jangan pakai o.end karena KOMDIS bisa kosong end
       .filter((o) => o.start)
 
       .map((o) => {
         let oStart = toMinutes(o.start);
-
-        // 🔥 kalau end kosong
-        // otomatis extend sampai akhir activity slot
         let oEnd = o.end ? toMinutes(o.end) : baseRange.end;
 
-        // crossing midnight
         if (oEnd <= oStart) {
           oEnd += 24 * 60;
         }
@@ -240,13 +205,10 @@ function mergeTimeline(base, overrides) {
         };
       })
 
-      // overlap dengan activity slot
       .filter((o) => o._end > baseRange.start && o._start < baseRange.end)
 
-      // urutkan berdasarkan waktu mulai
       .sort((a, b) => a._start - b._start);
 
-    // tidak ada override
     if (!ovs.length) {
       result.push({
         start: slot.start,
@@ -258,13 +220,19 @@ function mergeTimeline(base, overrides) {
     }
 
     ovs.forEach((o) => {
-      const oStart = Math.max(o._start, baseRange.start);
+      let oStart = Math.max(o._start, baseRange.start);
+      let oEnd = Math.min(o._end, baseRange.end);
 
-      const oEnd = Math.min(o._end, baseRange.end);
+      if (oStart >= oEnd) {
+        return;
+      }
 
-      // =========================
-      // SISA ACTIVITY SEBELUM OVERRIDE
-      // =========================
+      oStart = Math.max(oStart, current);
+
+      if (oStart >= oEnd) {
+        return;
+      }
+
       if (current < oStart) {
         result.push({
           start: toTime(current % (24 * 60)),
@@ -273,9 +241,6 @@ function mergeTimeline(base, overrides) {
         });
       }
 
-      // =========================
-      // INSERT OVERRIDE
-      // =========================
       result.push({
         start: toTime(oStart % (24 * 60)),
         end: toTime(oEnd % (24 * 60)),
@@ -296,9 +261,6 @@ function mergeTimeline(base, overrides) {
       current = Math.max(current, oEnd);
     });
 
-    // =========================
-    // SISA ACTIVITY TERAKHIR
-    // =========================
     if (current < baseRange.end) {
       result.push({
         start: toTime(current % (24 * 60)),
@@ -536,6 +498,7 @@ function addKMLRowsToMap(
     const nextCategory = mapKmlCategory(row["KML Category"]);
     const nextLocation = String(row.Location_W || "").trim();
     const nextItemCategory = String(row["ITEM CATEGORY"] || "").trim();
+    const nextMaterial = String(row["MATERIAL"] || "").trim();
     const source = String(row.SFROM || "")
       .trim()
       .toLowerCase();
@@ -549,9 +512,11 @@ function addKMLRowsToMap(
         endLocation: nextEndLocation,
         category: nextCategory,
         itemCategory: nextItemCategory,
-        // 🔥 Simpan ITEM CATEGORY terpisah untuk start dan end
+        material: nextMaterial || "",
         startItemCategory: source === "start" ? nextItemCategory : "",
         endItemCategory: source === "end" ? nextItemCategory : "",
+        startMaterial: source === "start" ? nextMaterial || "" : "",
+        endMaterial: source === "end" ? nextMaterial || "" : "",
       };
       return;
     }
@@ -559,20 +524,26 @@ function addKMLRowsToMap(
     const current = targetMap[code];
 
     targetMap[code] = {
-      location: current.location || nextLocation,
-      startLocation: current.startLocation || nextStartLocation,
-      endLocation: current.endLocation || nextEndLocation,
+      location: nextLocation || current.location,
+      startLocation: nextStartLocation || current.startLocation,
+      endLocation: nextEndLocation || current.endLocation,
       category: preserveExisting
         ? current.category
-        : choosePreferredKmlCategory(current.category, nextCategory),
-      // 🔥 Pertahankan ITEM CATEGORY pertama yang tidak kosong untuk konsistensi
-      itemCategory: current.itemCategory || nextItemCategory,
-      // 🔥 Simpan ITEM CATEGORY terpisah untuk start dan end
+        : (nextCategory || current.category),
+      itemCategory: nextItemCategory || current.itemCategory,
+      material: nextMaterial || current.material,
       startItemCategory:
-        current.startItemCategory ||
-        (source === "start" ? nextItemCategory : ""),
+        (source === "start" ? nextItemCategory : "") ||
+        current.startItemCategory,
       endItemCategory:
-        current.endItemCategory || (source === "end" ? nextItemCategory : ""),
+        (source === "end" ? nextItemCategory : "") ||
+        current.endItemCategory,
+      startMaterial:
+        (source === "start" ? nextMaterial || "" : "") ||
+        current.startMaterial,
+      endMaterial:
+        (source === "end" ? nextMaterial || "" : "") ||
+        current.endMaterial,
     };
   });
 }
@@ -858,7 +829,7 @@ function buildReportStatusRows(
         newRow["Working Section"] =
           dynamic["Working Section"] || locMaster.workingSection || "";
         newRow["Remarks"] = dynamic.Remarks || "";
-        newRow["Material"] = mapItemCategoryToMaterial(newRow["Item Category"]);
+        newRow["Material"] = kml.material || mapItemCategoryToMaterial(newRow["Item Category"]);
         newRow["Category BD"] = "";
         newRow["ABC - CC"] = "";
         newRow["Cut Off Report"] = dynamic["Cut Off Report"] || "";
@@ -988,15 +959,9 @@ function buildDynamicTimeline(
   kmlOverridesMap,
   kmlMeta,
 ) {
-  const kmlOverrides =
-    kmlOverridesMap && kmlOverridesMap[code]?.length
-      ? kmlOverridesMap[code]
-      : [];
   const sourceOverrides = overridesMap[code] || [];
 
-  // 🔥 FIX: Gabungkan KML overrides dengan source overrides (komdis/foreman)
-  // Prioritaskan source overrides untuk tracking KOMDIS, tapi gunakan KML untuk waktu
-  let overrides = [...(kmlOverrides || []), ...(sourceOverrides || [])];
+  let overrides = [...(sourceOverrides || [])];
 
   // 🔥 ADD WAITING BLASTING: Insert Waiting Blasting slot for Shift 1
   // Check if this unit has matching location and waiting blasting mode is active
@@ -1044,7 +1009,7 @@ function buildDynamicTimeline(
         source: "",
       }));
 
-  return capTimelineActivitySlots(overrides);
+  return overrides;
 }
 
 function resolveKmlLocationForSlot(
@@ -1080,7 +1045,7 @@ function resolveKmlLocationForSlot(
       return startLocation || fallback;
     }
 
-    if (slotStart >= toMinutes("01:00") && slotEnd <= shift2EndBoundary) {
+    if (slotEnd <= shift2EndBoundary) {
       return endLocation || startLocation || fallback;
     }
 
@@ -1139,6 +1104,13 @@ function resolveReportCategory(itemCategory, fallbackCategory) {
     itemCategory === "Waiting Blasting"
   ) {
     return "Standby";
+  }
+
+  if (
+    itemCategory === "Breakdown" ||
+    itemCategory === "BD Unschedule"
+  ) {
+    return "Breakdown";
   }
 
   return fallbackCategory || "";
@@ -1208,7 +1180,26 @@ function resolveItemCategory(itemCategory, category, kmlCategory = "") {
 }
 
 function buildReportCategory(itemCategory, fallbackCategory, kmlCategory = "") {
+  const normalizedItemCategory = String(itemCategory || "").trim();
   const normalizedKmlCategory = String(kmlCategory || "").trim();
+
+  if (normalizedItemCategory) {
+    if (
+      ["Breakdown", "BD Unschedule"].includes(normalizedItemCategory)
+    ) {
+      return "Breakdown";
+    }
+
+    if (
+      ["Meal and Rest", "Change Shift"].includes(normalizedItemCategory) ||
+      isStandbyTriggerItemCategory(normalizedItemCategory) ||
+      normalizedItemCategory === "Waiting Blasting"
+    ) {
+      return "Standby";
+    }
+
+    return "Working";
+  }
 
   if (
     normalizedKmlCategory === "Breakdown" ||
@@ -1221,7 +1212,7 @@ function buildReportCategory(itemCategory, fallbackCategory, kmlCategory = "") {
     return "Standby";
   }
 
-  return resolveReportCategory(itemCategory, fallbackCategory);
+  return fallbackCategory || "";
 }
 
 // REPORT DATE AND SHIFT
@@ -1638,18 +1629,8 @@ function processReportStatus() {
     );
 
     return timeline.map((t) => {
-      const category = buildReportCategory(
-        t.type || t.overrideType || row["Category"] || "",
-        row["Category"] || kmlMeta.category || "",
-        t.overrideType || kmlMeta.category,
-      );
-
       const kmlLocation = resolveKmlLocationForSlot(kmlMeta, t, selectedShift);
 
-      // 🔥 Jika KML Category = R (Working) dan slot type = Activity,
-      // gunakan ITEM CATEGORY dari lookup KML sesuai sumber (start/end)
-      // Level 2 (start time) → startItemCategory dari Equipment Coordinate Start
-      // Level 4 (end time) → endItemCategory dari Equipment Coordinate End
       let itemCategoryType = t.type || "";
 
       if (
@@ -1660,16 +1641,11 @@ function processReportStatus() {
         const slotStartMin = toMinutes(t.start || "");
         const slotEndMin = toMinutes(t.end || "");
 
-        // Tentukan apakah slot ini di waktu start atau end berdasarkan shift
-        // Jika kedua slot punya item category, gunakan nilai masing-masing.
-        // Hanya fallback ke pasangan ketika nilai yang diharapkan kosong.
         let useStartItemCategory = false;
 
         if (selectedShift === "Shift 1") {
-          // Shift 1: start = 06:30-12:00, end = 13:00-17:30
           useStartItemCategory = slotEndMin <= toMinutes("12:00");
         } else if (selectedShift === "Shift 2") {
-          // Shift 2: start = 18:30-00:00, end = 01:00-05:30
           useStartItemCategory =
             slotStartMin >= toMinutes("18:00") ||
             slotEndMin <= toMinutes("00:00");
@@ -1694,9 +1670,48 @@ function processReportStatus() {
 
       const itemCategory = resolveItemCategory(
         resolvedType,
-        category,
+        row["Category"] || kmlMeta.category || "",
         kmlMeta.category,
       );
+
+      const category = buildReportCategory(
+        itemCategory,
+        row["Category"] || kmlMeta.category || "",
+        t.overrideType || kmlMeta.category,
+      );
+
+      let material = kmlMeta.material || "";
+
+      if (!material) {
+        material = mapItemCategoryToMaterial(itemCategory);
+      }
+
+      if (
+        kmlMeta.category === "Working" &&
+        t.type === "Activity" &&
+        t.source !== "KOMDIS"
+      ) {
+        const slotStartMin = toMinutes(t.start || "");
+        const slotEndMin = toMinutes(t.end || "");
+
+        let useStartMaterial = false;
+
+        if (selectedShift === "Shift 1") {
+          useStartMaterial = slotEndMin <= toMinutes("12:00");
+        } else if (selectedShift === "Shift 2") {
+          useStartMaterial =
+            slotStartMin >= toMinutes("18:00") ||
+            slotEndMin <= toMinutes("00:00");
+        }
+
+        const chosenMaterial = useStartMaterial
+          ? kmlMeta.startMaterial
+          : kmlMeta.endMaterial;
+
+        if (chosenMaterial) {
+          material = chosenMaterial;
+        }
+      }
 
 return {
          ...baseRow,
@@ -1705,7 +1720,7 @@ return {
 
          "Item Category": itemCategory,
 
-         Material: mapItemCategoryToMaterial(itemCategory),
+         Material: material,
 
          Location: t.location || kmlLocation || baseRow.Location || "",
 

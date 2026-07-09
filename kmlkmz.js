@@ -240,23 +240,19 @@ function buildActivityMap(activityData) {
     // Key: EQP + KML CATEGORY (untuk kasus JOB kosong)
     if (kmlCategory) {
       const keyEqpCategory = eqp + "|" + kmlCategory;
-      if (!ACTIVITY_MAP[keyEqpCategory]) {
-        ACTIVITY_MAP[keyEqpCategory] = {
-          itemCategory: row["item category"] || "",
-          material: row["material"] || "",
-        };
-      }
+      ACTIVITY_MAP[keyEqpCategory] = {
+        itemCategory: row["item category"] || "",
+        material: row["material"] || "",
+      };
     }
 
     // Key: EQP + JOB (fallback tanpa KML CATEGORY)
     if (job) {
       const keyEqpJob = eqp + "|" + job;
-      if (!ACTIVITY_MAP[keyEqpJob]) {
-        ACTIVITY_MAP[keyEqpJob] = {
-          itemCategory: row["item category"] || "",
-          material: row["material"] || "",
-        };
-      }
+      ACTIVITY_MAP[keyEqpJob] = {
+        itemCategory: row["item category"] || "",
+        material: row["material"] || "",
+      };
     }
   });
 }
