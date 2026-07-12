@@ -231,28 +231,36 @@ function buildActivityMap(activityData) {
     // Key lengkap: EQP + KML CATEGORY + JOB (paling spesifik)
     if (kmlCategory && job) {
       const keyFull = eqp + "|" + kmlCategory + "|" + job;
-      ACTIVITY_MAP[keyFull] = {
-        itemCategory: row["item category"] || "",
-        material: row["material"] || "",
-      };
+      if (!ACTIVITY_MAP[keyFull]) {
+        ACTIVITY_MAP[keyFull] = {
+          itemCategory: row["item category"] || "",
+          material: row["material"] || "",
+        };
+      }
     }
 
     // Key: EQP + KML CATEGORY (untuk kasus JOB kosong)
+    // 🔥 JANGAN OVERWRITE: jika sudah ada dari baris sebelumnya, pertahankan
+    // agar item category tidak tertimpa baris lain yang share key generik.
     if (kmlCategory) {
       const keyEqpCategory = eqp + "|" + kmlCategory;
-      ACTIVITY_MAP[keyEqpCategory] = {
-        itemCategory: row["item category"] || "",
-        material: row["material"] || "",
-      };
+      if (!ACTIVITY_MAP[keyEqpCategory]) {
+        ACTIVITY_MAP[keyEqpCategory] = {
+          itemCategory: row["item category"] || "",
+          material: row["material"] || "",
+        };
+      }
     }
 
     // Key: EQP + JOB (fallback tanpa KML CATEGORY)
     if (job) {
       const keyEqpJob = eqp + "|" + job;
-      ACTIVITY_MAP[keyEqpJob] = {
-        itemCategory: row["item category"] || "",
-        material: row["material"] || "",
-      };
+      if (!ACTIVITY_MAP[keyEqpJob]) {
+        ACTIVITY_MAP[keyEqpJob] = {
+          itemCategory: row["item category"] || "",
+          material: row["material"] || "",
+        };
+      }
     }
   });
 }
