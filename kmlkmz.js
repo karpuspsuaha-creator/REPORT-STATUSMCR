@@ -442,19 +442,7 @@ function eqpSimilarity(a, b) {
 // =========================
 // BUILD ROWS
 // =========================
-function markDuplicates(data) {
-  const counts = {};
-
-  data.forEach((row) => {
-    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
-    counts[key] = (counts[key] || 0) + 1;
-  });
-
-  data.forEach((row) => {
-    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
-    row._duplicate = counts[key] > 1 ? "DUPLICATE" : "";
-  });
-}
+function buildRows(points, source = "") {
   return points.map((p) => {
     const parts = p.name.split(",").map((x) => x.trim());
 
