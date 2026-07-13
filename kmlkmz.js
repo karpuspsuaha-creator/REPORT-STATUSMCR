@@ -850,6 +850,20 @@ async function processKMLKMZ(
   return result;
 }
 
+function markDuplicates(data) {
+  const counts = {};
+
+  data.forEach((row) => {
+    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  data.forEach((row) => {
+    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
+    row._duplicate = counts[key] > 1 ? "DUPLICATE" : "";
+  });
+}
+
 // =========================
 // HANDLER
 // =========================
