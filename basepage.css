@@ -1062,6 +1062,12 @@ td.site-wrong {
   display: table-cell;
 }
 
+/* DUPLICATE ROW */
+tr.duplicate-row {
+  background-color: #fef2f2 !important;
+  outline: 2px solid #dc2626 !important;
+}
+
 /* =========================
    REPORT STATUS = MIRROR RESULT KML
 ========================= */

@@ -71,6 +71,19 @@ async function readKML(file) {
 // =========================
 // PARSE POINTS
 // =========================
+function convertUTCToWIB(timeStr) {
+  if (!timeStr) return "";
+  const s = String(timeStr).trim();
+  const match = s.match(/(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})/);
+  if (!match) return s;
+  let h = parseInt(match[2], 10);
+  if (s.endsWith("Z")) {
+    h = (h + 7) % 24;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${match[1]}T${pad(h)}:${match[3]}:${match[4]}`;
+}
+
 function parsePoints(xml) {
   const placemarks = findAllByLocalName(xml, "Placemark");
 
@@ -81,10 +94,27 @@ function parsePoints(xml) {
       .split(" ")[0]
       .split(",");
 
+    let time = "";
+
+    const timeStamp = findFirstByLocalName(p, "TimeStamp");
+    if (timeStamp) {
+      const when = findFirstByLocalName(timeStamp, "when");
+      if (when) time = convertUTCToWIB((when.textContent || "").trim());
+    }
+
+    if (!time) {
+      const timeSpan = findFirstByLocalName(p, "TimeSpan");
+      if (timeSpan) {
+        const begin = findFirstByLocalName(timeSpan, "begin");
+        if (begin) time = convertUTCToWIB((begin.textContent || "").trim());
+      }
+    }
+
     return {
       name,
       lon: parseFloat(coords[0]),
       lat: parseFloat(coords[1]),
+      time,
     };
   });
 }
@@ -412,7 +442,19 @@ function eqpSimilarity(a, b) {
 // =========================
 // BUILD ROWS
 // =========================
-function buildRows(points, source = "") {
+function markDuplicates(data) {
+  const counts = {};
+
+  data.forEach((row) => {
+    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  data.forEach((row) => {
+    const key = String(row.SFROM || "") + "|" + String(row.Name || "");
+    row._duplicate = counts[key] > 1 ? "DUPLICATE" : "";
+  });
+}
   return points.map((p) => {
     const parts = p.name.split(",").map((x) => x.trim());
 
@@ -464,6 +506,7 @@ function buildRows(points, source = "") {
       SFROM: source,
       lat: p.lat,
       lon: p.lon,
+      Time: p.time || "",
       _eqpValid: isEqpCorrect ? "OK" : "WRONG",
       _siteValid: isSiteCorrect ? "OK" : "WRONG",
     };
@@ -732,7 +775,8 @@ function renderResultTable(data) {
   html += `</tr></thead><tbody>`;
 
   pageData.forEach((row) => {
-    html += `<tr>`;
+    const rowClass = row._duplicate === "DUPLICATE" ? ' class="duplicate-row"' : "";
+    html += `<tr${rowClass}>`;
     headers.forEach((h) => {
       let value = row[h] ?? "";
 
@@ -851,6 +895,8 @@ async function handleKMLProcess() {
       : [];
 
     const result = [...startRows, ...endRows];
+
+    markDuplicates(result);
 
     // simpan global
     window.kmlResult = result;
